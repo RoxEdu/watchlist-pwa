@@ -1,65 +1,128 @@
-import Image from "next/image";
+'use client'
 
-export default function Home() {
+import { useMemo } from 'react'
+import { UserCircle, Cloud, CloudOff, RefreshCw } from 'lucide-react'
+import { useWatchlist } from '@/hooks/useWatchlist'
+import { useAuth } from '@/hooks/useAuth'
+import { useUIStore } from '@/lib/store'
+import MediaCard, { MediaListItem } from '@/components/MediaCard'
+import { STATUS_META } from '@/lib/types'
+import type { WatchlistItem } from '@/lib/types'
+
+function SectionRow({ title, items }: { title: string; items: WatchlistItem[] }) {
+  if (items.length === 0) return null
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <div className="mb-6">
+      <div className="flex items-center justify-between px-4 mb-3">
+        <h2 className="text-white font-semibold text-base">{title}</h2>
+        <span className="text-white/30 text-xs">{items.length}</span>
+      </div>
+      <div className="flex gap-3 overflow-x-auto px-4 scrollbar-none pb-1">
+        {items.slice(0, 10).map((item) => (
+          <div key={item.id} className="flex-shrink-0 w-[120px]">
+            <MediaCard item={item} />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function SyncIcon({ state }: { state: ReturnType<typeof useAuth>['syncState'] }) {
+  if (state === 'syncing') return <RefreshCw size={15} className="text-amber-400 animate-spin" />
+  if (state === 'done') return <Cloud size={15} className="text-emerald-400" />
+  if (state === 'error') return <CloudOff size={15} className="text-red-400" />
+  return null
+}
+
+export default function HomePage() {
+  const { items, isLoading } = useWatchlist()
+  const { user, syncState } = useAuth()
+  const { setProfileSheetOpen } = useUIStore()
+
+  const { watching, upToDate, wantToWatch, recent } = useMemo(() => ({
+    watching: items.filter((i) => i.status === 'watching'),
+    upToDate: items.filter((i) => i.status === 'up_to_date'),
+    wantToWatch: items.filter((i) => i.status === 'want_to_watch'),
+    recent: items.slice(0, 6),
+  }), [items])
+
+  const statCounts = useMemo(() => {
+    const c: Record<string, number> = {}
+    for (const item of items) c[item.status] = (c[item.status] ?? 0) + 1
+    return c
+  }, [items])
+
+  if (isLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <div className="h-6 w-6 rounded-full border-2 border-violet-500 border-t-transparent animate-spin" />
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-h-screen">
+      {/* Header */}
+      <div className="flex items-start justify-between px-4 pt-14 pb-6">
+        <div>
+          <p className="text-white/40 text-sm">Your</p>
+          <h1 className="text-white text-2xl font-bold mt-0.5">Watchlist</h1>
+          <p className="text-white/30 text-sm mt-1">{items.length} titles</p>
+        </div>
+        <button
+          onClick={() => setProfileSheetOpen(true)}
+          className="mt-1 flex items-center gap-2 rounded-full bg-white/8 px-3 py-2 hover:bg-white/12 transition-colors"
+        >
+          <SyncIcon state={user ? syncState : 'idle'} />
+          {!user && <CloudOff size={14} className="text-white/30" />}
+          <UserCircle size={20} className={user ? 'text-violet-400' : 'text-white/40'} />
+        </button>
+      </div>
+
+      {/* Stat chips */}
+      {items.length > 0 && (
+        <div className="flex gap-3 overflow-x-auto px-4 mb-6 scrollbar-none">
+          {(['watching', 'want_to_watch', 'finished', 'on_hold'] as const).map((s) => {
+            const count = statCounts[s] ?? 0
+            if (count === 0) return null
+            const meta = STATUS_META[s]
+            return (
+              <div key={s} className={`flex-shrink-0 rounded-xl px-4 py-3 ${meta.bg}`}>
+                <p className={`text-xl font-bold ${meta.color}`}>{count}</p>
+                <p className="text-white/50 text-[11px] mt-0.5">{meta.label}</p>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Empty state */}
+      {items.length === 0 && (
+        <div className="flex flex-col items-center justify-center px-6 py-20 text-center">
+          <div className="text-6xl mb-4">🎬</div>
+          <h2 className="text-white font-semibold text-lg mb-2">Nothing here yet</h2>
+          <p className="text-white/40 text-sm leading-relaxed">
+            Tap <span className="text-violet-400">+</span> to add movies, series, or anime.
+            {!user && (
+              <> Or <button className="text-violet-400 underline" onClick={() => setProfileSheetOpen(true)}>sign in</button> to sync across devices.</>
+            )}
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+      )}
+
+      <SectionRow title="Continue Watching" items={watching} />
+      <SectionRow title="Up to Date" items={upToDate} />
+      <SectionRow title="Want to Watch" items={wantToWatch} />
+
+      {recent.length > 0 && (
+        <div className="mb-6 px-4">
+          <h2 className="text-white font-semibold text-base mb-3">Recently Updated</h2>
+          <div className="flex flex-col gap-2">
+            {recent.map((item) => <MediaListItem key={item.id} item={item} />)}
+          </div>
         </div>
-      </main>
+      )}
     </div>
-  );
+  )
 }
