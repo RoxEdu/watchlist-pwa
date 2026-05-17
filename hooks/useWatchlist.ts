@@ -5,6 +5,7 @@ import { db, addItem, updateItem, deleteItem, getItemByImdbId } from '@/lib/db'
 import type { MediaType, Status, OMDbSearchResult, OMDbDetail, WatchlistItem } from '@/lib/types'
 import { getOMDbDetail, detectMediaType, parsePosterUrl, parseRating } from '@/lib/omdb'
 import { pushItem, deleteItemFromCloud } from '@/lib/sync'
+import type { TMDBSearchResult } from '@/lib/tmdb'
 
 export function useWatchlist() {
   const items = useLiveQuery(() => db.items.orderBy('updatedAt').reverse().toArray(), [])
@@ -78,6 +79,68 @@ export async function addDetailToWatchlist(detail: OMDbDetail): Promise<void> {
     totalEpisodes: null,
     notes: '',
     overview: detail.Plot ?? '',
+  })
+
+  const saved = await db.items.get(newId)
+  if (saved) pushItem(saved).catch(() => {})
+}
+
+export async function addSearchResultToWatchlist(result: TMDBSearchResult): Promise<void> {
+  const existing = await getItemByImdbId(result.tmdbId)
+  if (existing) return
+
+  const type: MediaType =
+    result.mediaType === 'movie' ? 'movie'
+    : result.mediaType === 'anime' ? 'anime'
+    : 'series'
+  const year = result.year ? parseInt(result.year) : null
+
+  const newId = await addItem({
+    imdbId: result.tmdbId,
+    title: result.title,
+    type,
+    status: 'want_to_watch',
+    posterUrl: result.posterUrl,
+    genres: [],
+    year: isNaN(year as number) ? null : year,
+    imdbRating: result.rating,
+    myRating: null,
+    currentSeason: 1,
+    currentEpisode: 0,
+    totalSeasons: null,
+    totalEpisodes: null,
+    notes: '',
+    overview: result.overview,
+  })
+
+  const saved = await db.items.get(newId)
+  if (saved) pushItem(saved).catch(() => {})
+}
+
+export async function addManualEntry(entry: {
+  title: string
+  year: string
+  type: MediaType
+}): Promise<void> {
+  const syntheticId = `custom-${Date.now()}`
+  const year = entry.year ? parseInt(entry.year) : null
+
+  const newId = await addItem({
+    imdbId: syntheticId,
+    title: entry.title.trim(),
+    type: entry.type,
+    status: 'want_to_watch',
+    posterUrl: null,
+    genres: [],
+    year: isNaN(year as number) ? null : year,
+    imdbRating: null,
+    myRating: null,
+    currentSeason: 1,
+    currentEpisode: 0,
+    totalSeasons: null,
+    totalEpisodes: null,
+    notes: '',
+    overview: '',
   })
 
   const saved = await db.items.get(newId)

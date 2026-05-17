@@ -6,6 +6,7 @@ import { useWatchlist } from '@/hooks/useWatchlist'
 import { useAuth } from '@/hooks/useAuth'
 import { useUIStore } from '@/lib/store'
 import MediaCard, { MediaListItem } from '@/components/MediaCard'
+import { AppLogo } from '@/components/Logo'
 import { STATUS_META } from '@/lib/types'
 import type { WatchlistItem } from '@/lib/types'
 
@@ -64,11 +65,13 @@ export default function HomePage() {
   return (
     <div className="min-h-screen">
       {/* Header */}
-      <div className="flex items-start justify-between px-4 pt-14 pb-6">
+      <div className="flex items-start justify-between px-4 pt-12 pb-6">
         <div>
-          <p className="text-white/40 text-sm">Your</p>
-          <h1 className="text-white text-2xl font-bold mt-0.5">Watchlist</h1>
-          <p className="text-white/30 text-sm mt-1">{items.length} titles</p>
+          <div className="flex items-center gap-2.5">
+            <AppLogo size={30} />
+            <h1 className="text-white text-xl font-bold tracking-tight">Watchlist</h1>
+          </div>
+          <p className="text-white/30 text-sm mt-1.5 pl-0.5">{items.length} titles</p>
         </div>
         <button
           onClick={() => setProfileSheetOpen(true)}
