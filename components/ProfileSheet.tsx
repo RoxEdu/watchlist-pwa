@@ -3,7 +3,7 @@
 import { useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import Image from 'next/image'
-import { X, LogIn, LogOut, Download, Upload, RefreshCw, Cloud, CloudOff } from 'lucide-react'
+import { X, LogIn, LogOut, Download, Upload, RefreshCw, Cloud, CloudOff, Sparkles } from 'lucide-react'
 import { useUIStore } from '@/lib/store'
 import { useAuth } from '@/hooks/useAuth'
 import { getAllItems, importItems } from '@/lib/db'
@@ -30,7 +30,7 @@ function SyncBadge({ state }: { state: ReturnType<typeof useAuth>['syncState'] }
 }
 
 export default function ProfileSheet() {
-  const { profileSheetOpen, setProfileSheetOpen } = useUIStore()
+  const { profileSheetOpen, setProfileSheetOpen, setSmartPasteOpen } = useUIStore()
   const { user, syncState, signInWithGoogle, signOut } = useAuth()
   const { items } = useWatchlist()
   const fileRef = useRef<HTMLInputElement>(null)
@@ -165,6 +165,22 @@ export default function ProfileSheet() {
                 <p className="text-white/60 text-sm">Total titles</p>
                 <p className="text-white font-bold">{items.length}</p>
               </div>
+
+              {/* Smart Paste */}
+              <button
+                onClick={() => { setSmartPasteOpen(true); close() }}
+                className="w-full flex items-center gap-3 rounded-2xl px-4 py-3.5 bg-gradient-to-r from-violet-600/15 to-fuchsia-600/15 border border-violet-500/20 hover:from-violet-600/20 hover:to-fuchsia-600/20 transition-all text-left"
+              >
+                <div className="h-9 w-9 rounded-xl bg-violet-500/20 flex items-center justify-center flex-shrink-0 shadow-sm">
+                  <Sparkles size={16} className="text-violet-400" />
+                </div>
+                <div>
+                  <p className="text-white text-sm font-semibold flex items-center gap-1.5">
+                    Smart Paste List <span className="rounded bg-violet-600/30 text-violet-300 text-[9px] font-bold px-1 py-0.5 uppercase tracking-wider">New</span>
+                  </p>
+                  <p className="text-white/40 text-xs">Paste titles & auto-sort into watchlist</p>
+                </div>
+              </button>
 
               {/* Export */}
               <button

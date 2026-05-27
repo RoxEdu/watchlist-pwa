@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
-import { UserCircle, Cloud, CloudOff, RefreshCw } from 'lucide-react'
+import { UserCircle, Cloud, CloudOff, RefreshCw, Sparkles } from 'lucide-react'
 import { useWatchlist } from '@/hooks/useWatchlist'
 import { useAuth } from '@/hooks/useAuth'
 import { useUIStore } from '@/lib/store'
@@ -9,6 +9,7 @@ import MediaCard, { MediaListItem } from '@/components/MediaCard'
 import { AppLogo } from '@/components/Logo'
 import { STATUS_META } from '@/lib/types'
 import type { WatchlistItem } from '@/lib/types'
+import SmartPaste from '@/components/SmartPaste'
 
 function SectionRow({ title, items }: { title: string; items: WatchlistItem[] }) {
   if (items.length === 0) return null
@@ -39,7 +40,7 @@ function SyncIcon({ state }: { state: ReturnType<typeof useAuth>['syncState'] })
 export default function HomePage() {
   const { items, isLoading } = useWatchlist()
   const { user, syncState } = useAuth()
-  const { setProfileSheetOpen } = useUIStore()
+  const { setProfileSheetOpen, setSmartPasteOpen } = useUIStore()
 
   const { watching, upToDate, wantToWatch, recent } = useMemo(() => ({
     watching: items.filter((i) => i.status === 'watching'),
@@ -102,15 +103,28 @@ export default function HomePage() {
 
       {/* Empty state */}
       {items.length === 0 && (
-        <div className="flex flex-col items-center justify-center px-6 py-20 text-center">
+        <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
           <div className="text-6xl mb-4">🎬</div>
           <h2 className="text-white font-semibold text-lg mb-2">Nothing here yet</h2>
-          <p className="text-white/40 text-sm leading-relaxed">
-            Tap <span className="text-violet-400">+</span> to add movies, series, or anime.
-            {!user && (
-              <> Or <button className="text-violet-400 underline" onClick={() => setProfileSheetOpen(true)}>sign in</button> to sync across devices.</>
-            )}
+          <p className="text-white/40 text-sm leading-relaxed max-w-xs mb-6">
+            Tap <span className="text-violet-400">+</span> to add titles, or import a list directly.
           </p>
+          <div className="flex flex-col gap-2.5 w-full max-w-[200px] items-center">
+            <button
+              onClick={() => setSmartPasteOpen(true)}
+              className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-violet-600 px-4 py-3 text-sm font-semibold text-white hover:bg-violet-500 transition-colors shadow-lg shadow-violet-600/10 active:scale-[0.98]"
+            >
+              <Sparkles size={14} /> Smart Paste List
+            </button>
+            {!user && (
+              <button
+                className="text-white/40 text-xs hover:text-white/60 transition-colors py-1 underline"
+                onClick={() => setProfileSheetOpen(true)}
+              >
+                Sign in to sync across devices
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -126,6 +140,7 @@ export default function HomePage() {
           </div>
         </div>
       )}
+      <SmartPaste />
     </div>
   )
 }

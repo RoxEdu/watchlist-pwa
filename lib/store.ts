@@ -25,6 +25,10 @@ interface UIState {
   // Profile / settings sheet
   profileSheetOpen: boolean
   setProfileSheetOpen: (v: boolean) => void
+
+  // Smart paste sheet
+  smartPasteOpen: boolean
+  setSmartPasteOpen: (v: boolean) => void
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -45,4 +49,7 @@ export const useUIStore = create<UIState>((set) => ({
 
   profileSheetOpen: false,
   setProfileSheetOpen: (v) => set({ profileSheetOpen: v }),
+
+  smartPasteOpen: false,
+  setSmartPasteOpen: (v) => set({ smartPasteOpen: v }),
 }))

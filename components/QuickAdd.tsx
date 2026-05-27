@@ -262,13 +262,6 @@ export default function QuickAdd() {
                       <div className="flex flex-col items-center justify-center py-14 text-white/20">
                         <Search size={32} className="mb-3" />
                         <p className="text-sm">Search to add to your watchlist</p>
-                        <button
-                          onClick={() => setShowManual(true)}
-                          className="mt-5 flex items-center gap-1.5 rounded-full bg-white/8 px-4 py-2 text-sm text-white/50 hover:bg-white/12 hover:text-white transition-colors"
-                        >
-                          <PenLine size={14} />
-                          Add manually instead
-                        </button>
                       </div>
                     )}
 
@@ -347,16 +340,7 @@ export default function QuickAdd() {
                       })}
                     </div>
 
-                    {/* "Still not finding it?" at the bottom of results */}
-                    {results.length > 0 && (
-                      <button
-                        onClick={() => setShowManual(true)}
-                        className="flex items-center gap-1.5 w-full justify-center py-4 text-xs text-white/25 hover:text-white/50 transition-colors"
-                      >
-                        <PenLine size={12} />
-                        Not finding it? Add manually
-                      </button>
-                    )}
+                    {/* Manual add option hidden here, only shows on empty or failed search */}
                   </div>
                 </>
               )}

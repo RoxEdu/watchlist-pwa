@@ -1,3 +1,5 @@
+'use client'
+
 interface LogoProps {
   size?: number
 }
@@ -10,43 +12,65 @@ export function AppLogo({ size = 32 }: LogoProps) {
       viewBox="0 0 32 32"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
+      className="drop-shadow-[0_2px_10px_rgba(139,92,246,0.35)]"
       aria-hidden="true"
     >
       <defs>
-        <linearGradient
-          id="watchlist-logo-grad"
-          x1="1" y1="5" x2="31" y2="27"
-          gradientUnits="userSpaceOnUse"
-        >
-          <stop offset="0%" stopColor="#a855f7" />
-          <stop offset="100%" stopColor="#5b21b6" />
+        <linearGradient id="logo-grad-primary" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#a855f7" /> {/* Violet 500 */}
+          <stop offset="50%" stopColor="#ec4899" /> {/* Pink 500 */}
+          <stop offset="100%" stopColor="#3b82f6" /> {/* Blue 500 */}
         </linearGradient>
+        <linearGradient id="logo-grad-secondary" x1="100%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stopColor="#06b6d4" /> {/* Cyan 500 */}
+          <stop offset="100%" stopColor="#8b5cf6" /> {/* Violet 500 */}
+        </linearGradient>
+        <filter id="logo-glow" x="-20%" y="-20%" width="140%" height="140%">
+          <feGaussianBlur stdDeviation="2" result="blur" />
+          <feComposite in="SourceGraphic" in2="blur" operator="over" />
+        </filter>
       </defs>
 
-      {/* Film strip body */}
-      <rect x="1" y="5" width="30" height="22" rx="3" fill="url(#watchlist-logo-grad)" />
+      {/* Outer Squircle with glowing gradient border */}
+      <rect
+        x="1.5"
+        y="1.5"
+        width="29"
+        height="29"
+        rx="9"
+        stroke="url(#logo-grad-primary)"
+        strokeWidth="2"
+        fill="#0d0d12"
+      />
 
-      {/* Left perforations */}
-      <rect x="1"   y="7.5"  width="3.5" height="2.5" rx="0.6" fill="#050505" />
-      <rect x="1"   y="12"   width="3.5" height="2.5" rx="0.6" fill="#050505" />
-      <rect x="1"   y="16.5" width="3.5" height="2.5" rx="0.6" fill="#050505" />
-      <rect x="1"   y="21"   width="3.5" height="2.5" rx="0.6" fill="#050505" />
+      {/* Glassmorphic Inner Frame */}
+      <rect
+        x="6"
+        y="6"
+        width="20"
+        height="20"
+        rx="5.5"
+        fill="url(#logo-grad-secondary)"
+        fillOpacity="0.12"
+        stroke="white"
+        strokeWidth="1"
+        strokeOpacity="0.08"
+      />
 
-      {/* Right perforations */}
-      <rect x="27.5" y="7.5"  width="3.5" height="2.5" rx="0.6" fill="#050505" />
-      <rect x="27.5" y="12"   width="3.5" height="2.5" rx="0.6" fill="#050505" />
-      <rect x="27.5" y="16.5" width="3.5" height="2.5" rx="0.6" fill="#050505" />
-      <rect x="27.5" y="21"   width="3.5" height="2.5" rx="0.6" fill="#050505" />
+      {/* Glowing Backdrop for Play Triangle */}
+      <path
+        d="M13 10 L21 16 L13 22 Z"
+        fill="url(#logo-grad-primary)"
+        filter="url(#logo-glow)"
+        opacity="0.8"
+      />
 
-      {/* Screen area */}
-      <rect x="6.5" y="8.5" width="19" height="15" rx="1.5" fill="#0d0520" />
-
-      {/* Top strip divider lines */}
-      <line x1="4.5" y1="5"  x2="4.5" y2="27" stroke="#050505" strokeWidth="0.5" strokeOpacity="0.6" />
-      <line x1="27.5" y1="5" x2="27.5" y2="27" stroke="#050505" strokeWidth="0.5" strokeOpacity="0.6" />
-
-      {/* Play triangle */}
-      <path d="M13 12 L13 20 L21 16 Z" fill="#ddd6fe" fillOpacity="0.95" />
+      {/* Sharp Foreground Play Triangle */}
+      <path
+        d="M13.25 10.5 L20.5 16 L13.25 21.5 Z"
+        fill="white"
+        fillOpacity="0.95"
+      />
     </svg>
   )
 }
@@ -55,7 +79,9 @@ export function AppLogoWordmark({ iconSize = 28 }: { iconSize?: number }) {
   return (
     <div className="flex items-center gap-2.5">
       <AppLogo size={iconSize} />
-      <span className="text-white font-bold text-xl tracking-tight">Watchlist</span>
+      <span className="bg-clip-text text-transparent bg-gradient-to-r from-white via-white to-white/70 font-extrabold text-xl tracking-tight">
+        Watchlist
+      </span>
     </div>
   )
 }

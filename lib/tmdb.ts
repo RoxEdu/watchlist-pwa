@@ -25,21 +25,26 @@ function yearFrom(dateStr?: string | null): string | null {
 async function searchItunesMovies(query: string, limit = 8): Promise<TMDBSearchResult[]> {
   try {
     const params = new URLSearchParams({
-      term: query, media: 'movie', entity: 'movie',
-      limit: String(limit), country: 'us',
+      term: query,
+      limit: String(Math.max(30, limit * 4)),
+      country: 'us',
     })
     const res = await fetch(`https://itunes.apple.com/search?${params}`)
     if (!res.ok) return []
     const json = await res.json()
-    return (json.results ?? []).map((r: Record<string, unknown>) => ({
-      tmdbId: `itunes-movie-${r.trackId}`,
-      title: String(r.trackName ?? ''),
-      year: yearFrom(r.releaseDate as string),
-      mediaType: 'movie' as const,
-      posterUrl: r.artworkUrl100 ? scaleItunes(r.artworkUrl100 as string) : null,
-      overview: String(r.longDescription ?? r.shortDescription ?? ''),
-      rating: null,
-    }))
+    const rawResults = json.results ?? []
+    return rawResults
+      .filter((r: any) => r.kind === 'feature-movie')
+      .slice(0, limit)
+      .map((r: Record<string, unknown>) => ({
+        tmdbId: `itunes-movie-${r.trackId}`,
+        title: String(r.trackName ?? ''),
+        year: yearFrom(r.releaseDate as string),
+        mediaType: 'movie' as const,
+        posterUrl: r.artworkUrl100 ? scaleItunes(r.artworkUrl100 as string) : null,
+        overview: String(r.longDescription ?? r.shortDescription ?? ''),
+        rating: null,
+      }))
   } catch {
     return []
   }
@@ -118,18 +123,15 @@ export async function searchTMDB(query: string): Promise<TMDBSearchResult[]> {
   return out
 }
 
-// Discover — movies: search iTunes for curated hit titles
 const CURATED_MOVIES = [
   'Dune Part Two 2024',
-  'Oppenheimer 2023',
+  'Dunkirk (2017)',
   'Barbie 2023',
-  'Inception Nolan',
   'The Dark Knight',
   'Interstellar',
-  'Parasite Bong',
-  'Avengers Endgame',
-  '1917 war',
-  'The Shawshank Redemption',
+  'Spider-Man: Across the Spider-Verse',
+  'Knives Out',
+  'Spider-Man: No Way Home',
 ]
 
 export async function getPopularMovies(): Promise<TMDBSearchResult[]> {
