@@ -128,7 +128,7 @@ async function scanSingleTitle(query: string, isCompleted: boolean, currentIndex
   ])
 
   // Parse TVMaze results
-  const tvShows = (tvmazeRes ?? []).slice(0, 3).map((item: any) => {
+  const tvShows = (Array.isArray(tvmazeRes) ? tvmazeRes : []).slice(0, 3).map((item: any) => {
     const show = item.show
     const similarity = Math.max(
       getSimilarity(query, show.name),
@@ -154,7 +154,7 @@ async function scanSingleTitle(query: string, isCompleted: boolean, currentIndex
   })
 
   // Parse iTunes results (movies only)
-  const itunesMovies = (itunesRes?.results ?? [])
+  const itunesMovies = (Array.isArray(itunesRes?.results) ? itunesRes.results : [])
     .filter((r: any) => r.kind === 'feature-movie')
     .slice(0, 3)
     .map((movie: any) => {
@@ -174,7 +174,7 @@ async function scanSingleTitle(query: string, isCompleted: boolean, currentIndex
     })
 
   // Parse Jikan Anime results
-  const jikanAnime = (jikanRes?.data ?? []).slice(0, 3).map((anime: any) => {
+  const jikanAnime = (Array.isArray(jikanRes?.data) ? jikanRes.data : []).slice(0, 3).map((anime: any) => {
     const title = anime.title_english ?? anime.title
     const similarity = getSimilarity(query, title)
     return {
@@ -192,8 +192,8 @@ async function scanSingleTitle(query: string, isCompleted: boolean, currentIndex
   })
 
   // Parse IMDb suggest results
-  const imdbShows = imdbItems
-    .filter((item: any) => item.id.startsWith('tt') && item.qid !== 'videoGame' && item.q !== 'video game')
+  const imdbShows = (Array.isArray(imdbItems) ? imdbItems : [])
+    .filter((item: any) => item && item.id && item.id.startsWith('tt') && item.qid !== 'videoGame' && item.q !== 'video game')
     .slice(0, 3)
     .map((item: any) => {
       const similarity = getSimilarity(query, item.l)
