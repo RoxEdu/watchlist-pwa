@@ -60,6 +60,9 @@ interface TVMazeShow {
   summary?: string | null
   rating?: { average: number | null }
   externals?: { imdb?: string | null }
+  language?: string | null
+  genres?: string[] | null
+  type?: string | null
 }
 
 async function tvMazeSearch(query: string, limit = 8): Promise<TMDBSearchResult[]> {
@@ -69,15 +72,22 @@ async function tvMazeSearch(query: string, limit = 8): Promise<TMDBSearchResult[
     )
     if (!res.ok) return []
     const data: Array<{ show: TVMazeShow }> = await res.json()
-    return data.slice(0, limit).map(({ show }) => ({
-      tmdbId: show.externals?.imdb || `tvmaze-${show.id}`,
-      title: show.name,
-      year: yearFrom(show.premiered),
-      mediaType: 'tv' as const,
-      posterUrl: show.image?.medium ?? null,
-      overview: show.summary?.replace(/<[^>]+>/g, '') ?? '',
-      rating: show.rating?.average ?? null,
-    }))
+    return data.slice(0, limit).map(({ show }) => {
+      const isAnime =
+        show.language === 'Japanese' ||
+        show.genres?.includes('Anime') ||
+        show.type === 'Animation'
+
+      return {
+        tmdbId: show.externals?.imdb || `tvmaze-${show.id}`,
+        title: show.name,
+        year: yearFrom(show.premiered),
+        mediaType: isAnime ? ('anime' as const) : ('tv' as const),
+        posterUrl: show.image?.medium ?? null,
+        overview: show.summary?.replace(/<[^>]+>/g, '') ?? '',
+        rating: show.rating?.average ?? null,
+      }
+    })
   } catch {
     return []
   }
@@ -191,8 +201,7 @@ export async function searchTMDB(query: string): Promise<TMDBSearchResult[]> {
 
   // Deduplicate by ID and normalized title
   const seenIds = new Set<string>()
-  const seenTitles = new Set<string>()
-  const deduped: TMDBSearchResult[] = []
+  const titleMap = new Map<string, TMDBSearchResult>()
 
   for (const item of out) {
     if (item.tmdbId.startsWith('tt')) {
@@ -200,26 +209,37 @@ export async function searchTMDB(query: string): Promise<TMDBSearchResult[]> {
       seenIds.add(item.tmdbId)
     }
     const normTitle = item.title.toLowerCase().replace(/[^a-z0-9]/g, '')
-    const titleKey = `${normTitle}-${item.mediaType}`
-    if (seenTitles.has(titleKey)) {
-      const existingIdx = deduped.findIndex(
-        (d) =>
-          d.title.toLowerCase().replace(/[^a-z0-9]/g, '') === normTitle &&
-          d.mediaType === item.mediaType,
-      )
-      if (existingIdx !== -1) {
-        const existing = deduped[existingIdx]
-        if (item.tmdbId.startsWith('tt') && !existing.tmdbId.startsWith('tt')) {
-          deduped[existingIdx] = item
+    if (!normTitle) continue
+
+    const existing = titleMap.get(normTitle)
+    if (existing) {
+      let preferred = existing
+      
+      const newIsAnime = item.mediaType === 'anime'
+      const oldIsAnime = existing.mediaType === 'anime'
+
+      if (newIsAnime && !oldIsAnime) {
+        preferred = { ...item, mediaType: 'anime' }
+      } else if (!newIsAnime && oldIsAnime) {
+        preferred = { ...existing, mediaType: 'anime' }
+      }
+
+      if (item.tmdbId.startsWith('tt') && !existing.tmdbId.startsWith('tt')) {
+        preferred = {
+          ...preferred,
+          tmdbId: item.tmdbId,
+          posterUrl: item.posterUrl || preferred.posterUrl,
+          overview: item.overview || preferred.overview,
         }
       }
-      continue
+      
+      titleMap.set(normTitle, preferred)
+    } else {
+      titleMap.set(normTitle, item)
     }
-    seenTitles.add(titleKey)
-    deduped.push(item)
   }
 
-  return deduped
+  return Array.from(titleMap.values())
 }
 
 const CURATED_MOVIES = [
