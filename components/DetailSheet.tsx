@@ -131,13 +131,36 @@ export default function DetailSheet() {
             <div className="mt-4">
               <p className="text-xs text-white/40 uppercase tracking-widest mb-2">Progress</p>
               <div className="flex items-center gap-4 bg-white/5 rounded-xl px-4 py-3">
-                <div className="flex-1">
-                  <p className="text-white font-semibold">Season {item.currentSeason} · Episode {item.currentEpisode}</p>
-                  {item.totalSeasons && (
-                    <p className="text-white/40 text-xs">of {item.totalSeasons} seasons</p>
-                  )}
+                <div className="flex-1 flex items-center gap-3">
+                  <div className="flex-1">
+                    <label className="text-[10px] text-white/40 uppercase font-semibold block mb-0.5">Season</label>
+                    <input
+                      type="number"
+                      value={item.currentSeason}
+                      onChange={(e) => {
+                        const val = Math.max(1, parseInt(e.target.value, 10) || 1)
+                        updateItem(item.id, { currentSeason: val })
+                        setDetailItem({ ...item, currentSeason: val })
+                      }}
+                      className="w-full bg-transparent text-white font-semibold outline-none border-b border-white/10 focus:border-violet-500 py-0.5 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    />
+                  </div>
+                  <div className="h-8 w-[1px] bg-white/10 self-end" />
+                  <div className="flex-1.5">
+                    <label className="text-[10px] text-white/40 uppercase font-semibold block mb-0.5">Episode</label>
+                    <input
+                      type="number"
+                      value={item.currentEpisode}
+                      onChange={(e) => {
+                        const val = Math.max(0, parseInt(e.target.value, 10) || 0)
+                        updateItem(item.id, { currentEpisode: val })
+                        setDetailItem({ ...item, currentEpisode: val })
+                      }}
+                      className="w-full bg-transparent text-white font-semibold outline-none border-b border-white/10 focus:border-violet-500 py-0.5 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    />
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 self-end">
                   <button
                     onClick={() => {
                       const prev = Math.max(0, item.currentEpisode - 1)

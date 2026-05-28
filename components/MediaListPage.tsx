@@ -1,5 +1,6 @@
 'use client'
 
+import { useState, useEffect, useRef } from 'react'
 import { useUIStore, type SortOption } from '@/lib/store'
 import { useFilteredWatchlist } from '@/hooks/useWatchlist'
 import MediaCard from '@/components/MediaCard'
@@ -15,6 +16,33 @@ interface MediaListPageProps {
 export default function MediaListPage({ type, title, emoji }: MediaListPageProps) {
   const { statusFilter, sortBy, setSortBy } = useUIStore()
   const items = useFilteredWatchlist(type, statusFilter)
+
+  const [visibleCount, setVisibleCount] = useState(20)
+  const triggerRef = useRef<HTMLDivElement>(null)
+
+  // Reset pagination when filter, sort, or type changes
+  useEffect(() => {
+    setVisibleCount(20)
+  }, [type, statusFilter, sortBy])
+
+  // Infinite scroll observer
+  useEffect(() => {
+    if (!triggerRef.current || visibleCount >= items.length) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setVisibleCount((prev) => Math.min(items.length, prev + 20))
+        }
+      },
+      { rootMargin: '200px' }
+    )
+
+    observer.observe(triggerRef.current)
+    return () => observer.disconnect()
+  }, [items.length, visibleCount])
+
+  const visibleItems = items.slice(0, visibleCount)
 
   return (
     <div className="min-h-screen">
@@ -54,11 +82,20 @@ export default function MediaListPage({ type, title, emoji }: MediaListPageProps
           <p className="text-white/40 text-sm">Nothing here yet — tap + to add some {title.toLowerCase()}.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3 px-4 py-4">
-          {items.map((item) => (
-            <MediaCard key={item.id} item={item} />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-2 gap-3 px-4 py-4">
+            {visibleItems.map((item) => (
+              <MediaCard key={item.id} item={item} />
+            ))}
+          </div>
+
+          {/* Infinite Scroll Trigger */}
+          {visibleCount < items.length && (
+            <div ref={triggerRef} className="w-full h-12 flex items-center justify-center py-4">
+              <div className="h-5 w-5 rounded-full border-2 border-violet-500 border-t-transparent animate-spin" />
+            </div>
+          )}
+        </>
       )}
     </div>
   )
