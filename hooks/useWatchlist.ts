@@ -34,6 +34,18 @@ function sortWatchlistItems(items: WatchlistItem[], sortBy: string): WatchlistIt
       if (yA === yB) return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
       return yA - yB
     }
+    if (sortBy === 'my_rating_desc') {
+      const rA = a.myRating ?? 0
+      const rB = b.myRating ?? 0
+      if (rA === rB) return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+      return rB - rA
+    }
+    if (sortBy === 'imdb_rating_desc') {
+      const rA = a.imdbRating ?? 0
+      const rB = b.imdbRating ?? 0
+      if (rA === rB) return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+      return rB - rA
+    }
     return 0
   })
 }
@@ -317,6 +329,111 @@ export async function incrementEpisode(item: WatchlistItem): Promise<void> {
 export async function removeFromWatchlist(item: WatchlistItem): Promise<void> {
   await deleteItem(item.id)
   deleteItemFromCloud(item.imdbId).catch(() => {})
+}
+
+export async function syncWatchlistMetadata(
+  onProgress: (msg: string) => void
+): Promise<{ updatedCount: number; newSeasons: string[] }> {
+  const allItems = await db.items.toArray()
+  const shows = allItems.filter(
+    (item) => item.type === 'series' || item.type === 'anime' || item.type === 'mini_series'
+  )
+
+  let updatedCount = 0
+  const newSeasons: string[] = []
+
+  for (let i = 0; i < shows.length; i++) {
+    const show = shows[i]
+    onProgress(`Checking (${i + 1}/${shows.length}): "${show.title}"...`)
+
+    try {
+      if (show.imdbId && show.imdbId.startsWith('tt')) {
+        // TVMaze Lookup
+        const lookupRes = await fetch(`https://api.tvmaze.com/lookup/shows?imdb=${show.imdbId}`)
+        if (lookupRes.ok) {
+          const showData = await lookupRes.json()
+          const tvmazeId = showData.id
+          
+          // Fetch Seasons
+          const seasonsRes = await fetch(`https://api.tvmaze.com/shows/${tvmazeId}/seasons`)
+          if (seasonsRes.ok) {
+            const seasonsList = await seasonsRes.json()
+            const totalSeasons = seasonsList.length
+            
+            const now = new Date()
+            let hasUpcomingSeason = false
+            seasonsList.forEach((s: any) => {
+              if (s.premiereDate) {
+                const prem = new Date(s.premiereDate)
+                if (prem > now) hasUpcomingSeason = true
+              }
+            })
+
+            const oldTotal = show.totalSeasons ?? 0
+            if (totalSeasons > oldTotal || hasUpcomingSeason) {
+              let msg = show.title
+              if (totalSeasons > oldTotal) {
+                msg += ` (Season ${totalSeasons} is available)`
+              } else if (hasUpcomingSeason) {
+                msg += ` (New season announced)`
+              }
+              if (!newSeasons.includes(msg)) newSeasons.push(msg)
+            }
+
+            if (totalSeasons !== show.totalSeasons) {
+              await updateItem(show.id, { totalSeasons })
+              updatedCount++
+            }
+          }
+        }
+      } else if (show.imdbId && show.imdbId.startsWith('jikan-')) {
+        const malId = show.imdbId.replace('jikan-', '')
+        
+        // Delay to prevent MAL Jikan rate limits
+        await new Promise((resolve) => setTimeout(resolve, 800))
+        
+        // Fetch Anime Details
+        const animeRes = await fetch(`https://api.jikan.moe/v4/anime/${malId}`)
+        if (animeRes.ok) {
+          const json = await animeRes.json()
+          const episodes = json.data?.episodes ?? null
+          
+          if (episodes !== show.totalEpisodes) {
+            await updateItem(show.id, { totalEpisodes: episodes })
+            updatedCount++
+          }
+
+          // Delay before relations fetch
+          await new Promise((resolve) => setTimeout(resolve, 800))
+          
+          const relationsRes = await fetch(`https://api.jikan.moe/v4/anime/${malId}/relations`)
+          if (relationsRes.ok) {
+            const relationsJson = await relationsRes.json()
+            const hasSequel = (relationsJson.data ?? []).some(
+              (rel: any) => rel.relation === 'Sequel'
+            )
+            if (hasSequel) {
+              const msg = `${show.title} (New season/sequel announced)`
+              if (!newSeasons.includes(msg)) newSeasons.push(msg)
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error(`Error updating metadata for ${show.title}:`, err)
+    }
+  }
+
+  // Reload local detailItem if open
+  try {
+    const detailItem = useUIStore.getState().detailItem
+    if (detailItem) {
+      const refreshed = await db.items.get(detailItem.id)
+      if (refreshed) useUIStore.getState().setDetailItem(refreshed)
+    }
+  } catch {}
+
+  return { updatedCount, newSeasons }
 }
 
 export { updateItem, deleteItem }

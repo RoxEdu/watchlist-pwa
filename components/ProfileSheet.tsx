@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef } from 'react'
+import { useState, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import Image from 'next/image'
 import { X, LogIn, LogOut, Download, Upload, RefreshCw, Cloud, CloudOff, Sparkles } from 'lucide-react'
@@ -8,7 +8,8 @@ import { useUIStore } from '@/lib/store'
 import { useAuth } from '@/hooks/useAuth'
 import { getAllItems, importItems } from '@/lib/db'
 import { syncFromCloud, pushItem } from '@/lib/sync'
-import { useWatchlist } from '@/hooks/useWatchlist'
+import { cn } from '@/lib/utils'
+import { useWatchlist, syncWatchlistMetadata } from '@/hooks/useWatchlist'
 
 function SyncBadge({ state }: { state: ReturnType<typeof useAuth>['syncState'] }) {
   if (state === 'syncing') return (
@@ -35,7 +36,32 @@ export default function ProfileSheet() {
   const { items } = useWatchlist()
   const fileRef = useRef<HTMLInputElement>(null)
 
-  function close() { setProfileSheetOpen(false) }
+  const [isSyncingMetadata, setIsSyncingMetadata] = useState(false)
+  const [syncProgressMsg, setSyncProgressMsg] = useState('')
+  const [syncResult, setSyncResult] = useState<{ updatedCount: number; newSeasons: string[] } | null>(null)
+
+  function close() {
+    if (isSyncingMetadata) return
+    setProfileSheetOpen(false)
+    setSyncResult(null)
+  }
+
+  async function handleCheckUpdates() {
+    if (isSyncingMetadata) return
+    setIsSyncingMetadata(true)
+    setSyncResult(null)
+    setSyncProgressMsg('Analyzing watchlist...')
+    try {
+      const result = await syncWatchlistMetadata((msg) => {
+        setSyncProgressMsg(msg)
+      })
+      setSyncResult(result)
+    } catch (err) {
+      alert('Failed to check for updates.')
+    } finally {
+      setIsSyncingMetadata(false)
+    }
+  }
 
   async function handleExport() {
     const all = await getAllItems()
@@ -85,7 +111,7 @@ export default function ProfileSheet() {
             onClick={close}
           />
           <motion.div
-            className="fixed inset-x-0 bottom-0 z-50 rounded-t-2xl bg-[#141414] border-t border-white/10 pb-safe"
+            className="fixed inset-x-0 bottom-0 z-50 rounded-t-2xl bg-[#141414] border-t border-white/10 pb-safe overflow-hidden relative"
             initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
             transition={{ type: 'spring', damping: 30, stiffness: 300 }}
             onClick={(e) => e.stopPropagation()}
@@ -182,10 +208,25 @@ export default function ProfileSheet() {
                 </div>
               </button>
 
+              {/* Check for Updates */}
+              <button
+                onClick={handleCheckUpdates}
+                disabled={isSyncingMetadata}
+                className="w-full flex items-center gap-3 rounded-2xl px-4 py-3.5 bg-white/5 hover:bg-white/8 transition-colors text-left disabled:opacity-50 cursor-pointer"
+              >
+                <div className="h-9 w-9 rounded-xl bg-violet-500/20 flex items-center justify-center flex-shrink-0">
+                  <RefreshCw size={16} className={cn("text-violet-400", isSyncingMetadata && "animate-spin")} />
+                </div>
+                <div>
+                  <p className="text-white text-sm font-semibold">Check for Updates</p>
+                  <p className="text-white/40 text-xs">Scan watchlist for new seasons/episodes</p>
+                </div>
+              </button>
+
               {/* Export */}
               <button
                 onClick={handleExport}
-                className="w-full flex items-center gap-3 rounded-2xl px-4 py-3.5 bg-white/5 hover:bg-white/8 transition-colors text-left"
+                className="w-full flex items-center gap-3 rounded-2xl px-4 py-3.5 bg-white/5 hover:bg-white/8 transition-colors text-left cursor-pointer"
               >
                 <div className="h-9 w-9 rounded-xl bg-violet-500/20 flex items-center justify-center flex-shrink-0">
                   <Download size={16} className="text-violet-400" />
@@ -199,7 +240,7 @@ export default function ProfileSheet() {
               {/* Import */}
               <button
                 onClick={() => fileRef.current?.click()}
-                className="w-full flex items-center gap-3 rounded-2xl px-4 py-3.5 bg-white/5 hover:bg-white/8 transition-colors text-left"
+                className="w-full flex items-center gap-3 rounded-2xl px-4 py-3.5 bg-white/5 hover:bg-white/8 transition-colors text-left cursor-pointer"
               >
                 <div className="h-9 w-9 rounded-xl bg-emerald-500/20 flex items-center justify-center flex-shrink-0">
                   <Upload size={16} className="text-emerald-400" />
@@ -217,6 +258,80 @@ export default function ProfileSheet() {
                 onChange={handleImport}
               />
             </div>
+
+            {/* Progress overlay */}
+            <AnimatePresence>
+              {isSyncingMetadata && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/90 px-6 text-center rounded-t-2xl"
+                >
+                  <RefreshCw size={36} className="text-violet-400 animate-spin mb-4" />
+                  <h3 className="text-white font-semibold text-base mb-1.5">Checking for Updates...</h3>
+                  <p className="text-violet-300/80 text-xs font-mono max-w-xs truncate px-4">
+                    {syncProgressMsg}
+                  </p>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Results overlay */}
+            <AnimatePresence>
+              {syncResult && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className="absolute inset-0 z-50 flex flex-col bg-[#141414] p-4 rounded-t-2xl"
+                >
+                  <div className="flex items-center justify-between border-b border-white/8 pb-3 mb-4 flex-shrink-0">
+                    <h3 className="text-white font-semibold text-base">Update Check Complete</h3>
+                    <button
+                      onClick={() => setSyncResult(null)}
+                      className="p-1 rounded-full bg-white/8 text-white/60 hover:text-white cursor-pointer"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+                    <div className="bg-white/5 rounded-xl p-4">
+                      <p className="text-white/60 text-xs uppercase tracking-wider font-semibold">Updates Summary</p>
+                      <p className="text-white text-sm mt-1">
+                        Updated season/episode counts for <span className="text-violet-400 font-bold">{syncResult.updatedCount}</span> titles.
+                      </p>
+                    </div>
+
+                    {syncResult.newSeasons.length > 0 ? (
+                      <div>
+                        <p className="text-white/40 text-xs uppercase tracking-wider font-semibold px-1 mb-2">New Seasons Detected</p>
+                        <div className="space-y-2">
+                          {syncResult.newSeasons.map((item, idx) => (
+                            <div key={idx} className="bg-emerald-500/10 border border-emerald-500/25 rounded-xl p-3 flex items-start gap-2">
+                              <span className="text-emerald-400 text-sm">🎉</span>
+                              <p className="text-emerald-300 text-xs font-medium leading-relaxed">{item}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="bg-white/5 rounded-xl p-4 text-center py-6 text-white/40 text-xs">
+                        No new seasons or sequels detected this time. All shows are up to date!
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={() => setSyncResult(null)}
+                    className="w-full mt-4 bg-violet-600 hover:bg-violet-500 text-white font-semibold py-3 rounded-xl transition-all active:scale-[0.98] cursor-pointer flex-shrink-0"
+                  >
+                    Done
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </motion.div>
         </>
       )}

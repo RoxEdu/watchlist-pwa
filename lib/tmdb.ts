@@ -199,47 +199,64 @@ export async function searchTMDB(query: string): Promise<TMDBSearchResult[]> {
     if (anime[i]) out.push(anime[i])
   }
 
-  // Deduplicate by ID and normalized title
-  const seenIds = new Set<string>()
-  const titleMap = new Map<string, TMDBSearchResult>()
-
+  // 1. Group by ID first to merge metadata for the same ID (e.g. IMDb vs TVMaze vs Jikan)
+  const idMap = new Map<string, TMDBSearchResult>()
   for (const item of out) {
-    if (item.tmdbId.startsWith('tt')) {
-      if (seenIds.has(item.tmdbId)) continue
-      seenIds.add(item.tmdbId)
-    }
-    const normTitle = item.title.toLowerCase().replace(/[^a-z0-9]/g, '')
-    if (!normTitle) continue
-
-    const existing = titleMap.get(normTitle)
+    const id = item.tmdbId
+    const existing = idMap.get(id)
     if (existing) {
-      let preferred = existing
-      
+      const merged = { ...existing }
       const newIsAnime = item.mediaType === 'anime'
       const oldIsAnime = existing.mediaType === 'anime'
 
       if (newIsAnime && !oldIsAnime) {
-        preferred = { ...item, mediaType: 'anime' }
-      } else if (!newIsAnime && oldIsAnime) {
-        preferred = { ...existing, mediaType: 'anime' }
+        merged.mediaType = 'anime'
+      } else if (item.mediaType === 'tv' && merged.mediaType === 'movie') {
+        merged.mediaType = 'tv'
       }
 
-      if (item.tmdbId.startsWith('tt') && !existing.tmdbId.startsWith('tt')) {
-        preferred = {
-          ...preferred,
-          tmdbId: item.tmdbId,
-          posterUrl: item.posterUrl || preferred.posterUrl,
-          overview: item.overview || preferred.overview,
-        }
-      }
-      
-      titleMap.set(normTitle, preferred)
+      merged.title = existing.title || item.title
+      merged.posterUrl = existing.posterUrl || item.posterUrl
+      merged.overview = existing.overview || item.overview
+      merged.rating = existing.rating || item.rating
+      idMap.set(id, merged)
     } else {
-      titleMap.set(normTitle, item)
+      idMap.set(id, item)
     }
   }
 
-  return Array.from(titleMap.values())
+  // 2. Deduplicate/merge by normalized title + mediaType
+  const mergedMap = new Map<string, TMDBSearchResult>()
+  for (const item of idMap.values()) {
+    const normTitle = item.title.toLowerCase().replace(/[^a-z0-9]/g, '')
+    if (!normTitle) continue
+
+    const key = `${normTitle}_${item.mediaType}`
+    const existing = mergedMap.get(key)
+    if (existing) {
+      let preferred = existing
+      if (item.tmdbId.startsWith('tt') && !existing.tmdbId.startsWith('tt')) {
+        preferred = {
+          ...item,
+          posterUrl: item.posterUrl || existing.posterUrl,
+          overview: item.overview || existing.overview,
+          rating: item.rating || existing.rating,
+        }
+      } else {
+        preferred = {
+          ...existing,
+          posterUrl: existing.posterUrl || item.posterUrl,
+          overview: existing.overview || item.overview,
+          rating: existing.rating || item.rating,
+        }
+      }
+      mergedMap.set(key, preferred)
+    } else {
+      mergedMap.set(key, item)
+    }
+  }
+
+  return Array.from(mergedMap.values())
 }
 
 const CURATED_MOVIES = [

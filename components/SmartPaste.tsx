@@ -10,6 +10,7 @@ import { useAuth } from '@/hooks/useAuth'
 import type { MediaType, Status } from '@/lib/types'
 import { STATUS_META, MEDIA_TYPE_LABELS } from '@/lib/types'
 import Image from 'next/image'
+import { cn } from '@/lib/utils'
 
 interface Alternative {
   id: string
@@ -331,6 +332,7 @@ export default function SmartPaste() {
   const [step, setStep] = useState<'input' | 'scanning' | 'preview'>('input')
   const [progress, setProgress] = useState({ current: 0, total: 0, currentTitle: '' })
   const [parsedItems, setParsedItems] = useState<ParsedItem[]>([])
+  const [expandedAlts, setExpandedAlts] = useState<Record<number, boolean>>({})
   const [importing, setImporting] = useState(false)
   const [reScanningId, setReScanningId] = useState<string | null>(null)
 
@@ -341,6 +343,7 @@ export default function SmartPaste() {
       setText('')
       setStep('input')
       setParsedItems([])
+      setExpandedAlts({})
       setImporting(false)
       setProgress({ current: 0, total: 0, currentTitle: '' })
       setTimeout(() => textareaRef.current?.focus(), 150)
@@ -462,6 +465,13 @@ export default function SmartPaste() {
 
     setProgress((p) => ({ ...p, current: rawItems.length, currentTitle: 'Complete!' }))
     setParsedItems(results)
+
+    const initialExpanded: Record<number, boolean> = {}
+    results.forEach((item, index) => {
+      if (item.isUnsure) initialExpanded[index] = true
+    })
+    setExpandedAlts(initialExpanded)
+
     setStep('preview')
   }
 
@@ -561,6 +571,7 @@ export default function SmartPaste() {
           idx === index ? { ...updated, isEditing: false, editQuery: undefined } : p,
         )
       )
+      setExpandedAlts((prev) => ({ ...prev, [index]: updated.isUnsure }))
     } catch {
       alert('Rescan failed.')
     } finally {
@@ -837,33 +848,58 @@ export default function SmartPaste() {
                             )}
                           </div>
 
-                          {/* Alternatives UI (If Unsure) */}
-                          {!item.isEditing && item.isUnsure && item.alternatives && item.alternatives.length > 0 && (
-                            <div className="mt-2.5 ml-8 p-3 bg-white/5 border border-white/8 rounded-xl space-y-2">
-                              <span className="text-[9px] text-white/50 font-bold tracking-wide uppercase flex items-center gap-1">
-                                <AlertCircle size={10} className="text-amber-500" /> Did you mean?
-                              </span>
-                              <div className="flex flex-col gap-1.5">
-                                {item.alternatives.map((alt) => (
-                                  <button
-                                    key={alt.id}
-                                    onClick={() => handleSelectAlternative(idx, alt)}
-                                    className="w-full text-left text-xs px-3 py-2 rounded-lg bg-black/30 hover:bg-black/50 border border-white/5 hover:border-violet-500/30 transition-all flex items-center justify-between gap-2"
-                                  >
-                                    <div className="min-w-0">
-                                      <span className="text-white font-medium block truncate text-[11px]">{alt.title}</span>
-                                      <span className="text-[9px] text-white/40 block">
-                                        {alt.mediaType.toUpperCase()} {alt.year ? `· ${alt.year}` : ''} {alt.mediaType !== 'movie' ? `(${alt.airingStatus === 'finished' ? 'Ended' : 'Running'})` : ''}
+                          {/* Alternatives UI (Collapsible dropdown) */}
+                          {!item.isEditing && (() => {
+                            const otherAlts = item.alternatives ? item.alternatives.filter((alt) => alt.id !== item.id) : []
+                            const isExpanded = !!expandedAlts[idx]
+                            if (otherAlts.length === 0) return null
+
+                            return (
+                              <div className="mt-2 ml-8">
+                                <button
+                                  onClick={() => setExpandedAlts((prev) => ({ ...prev, [idx]: !prev[idx] }))}
+                                  className="inline-flex items-center gap-1.5 text-[10px] font-semibold text-violet-400 hover:text-violet-300 transition-colors py-1 cursor-pointer"
+                                >
+                                  <ChevronDown size={12} className={cn("transition-transform duration-200", isExpanded && "rotate-180")} />
+                                  {isExpanded ? "Hide other matches" : `Show other matches (${otherAlts.length})`}
+                                </button>
+
+                                <AnimatePresence>
+                                  {isExpanded && (
+                                    <motion.div
+                                      initial={{ height: 0, opacity: 0 }}
+                                      animate={{ height: "auto", opacity: 1 }}
+                                      exit={{ height: 0, opacity: 0 }}
+                                      className="overflow-hidden mt-1.5 p-3 bg-white/5 border border-white/8 rounded-xl space-y-2"
+                                    >
+                                      <span className="text-[9px] text-white/50 font-bold tracking-wide uppercase flex items-center gap-1">
+                                        <AlertCircle size={10} className="text-amber-500" /> Alternatives
                                       </span>
-                                    </div>
-                                    <div className="rounded-full bg-white/5 px-2 py-0.5 text-[9px] font-bold text-violet-400 border border-violet-500/10 flex-shrink-0">
-                                      Select
-                                    </div>
-                                  </button>
-                                ))}
+                                      <div className="flex flex-col gap-1.5">
+                                        {otherAlts.map((alt) => (
+                                          <button
+                                            key={alt.id}
+                                            onClick={() => handleSelectAlternative(idx, alt)}
+                                            className="w-full text-left text-xs px-3 py-2 rounded-lg bg-black/30 hover:bg-black/50 border border-white/5 hover:border-violet-500/30 transition-all flex items-center justify-between gap-2 cursor-pointer"
+                                          >
+                                            <div className="min-w-0">
+                                              <span className="text-white font-medium block truncate text-[11px]">{alt.title}</span>
+                                              <span className="text-[9px] text-white/40 block">
+                                                {MEDIA_TYPE_LABELS[alt.mediaType]} {alt.year ? `· ${alt.year}` : ''} {alt.mediaType !== 'movie' ? `(${alt.airingStatus === 'finished' ? 'Ended' : 'Running'})` : ''}
+                                              </span>
+                                            </div>
+                                            <div className="rounded-full bg-white/5 px-2 py-0.5 text-[9px] font-bold text-violet-400 border border-violet-500/10 flex-shrink-0">
+                                              Select
+                                            </div>
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </motion.div>
+                                  )}
+                                </AnimatePresence>
                               </div>
-                            </div>
-                          )}
+                            )
+                          })()}
                         </div>
                       )
                     })

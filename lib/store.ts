@@ -42,6 +42,9 @@ export type SortOption =
   | 'alphabetical_za'
   | 'newest_release'
   | 'oldest_release'
+  | 'my_rating_desc'
+  | 'imdb_rating_desc'
+
 
 export const useUIStore = create<UIState>((set) => ({
   quickAddOpen: false,
