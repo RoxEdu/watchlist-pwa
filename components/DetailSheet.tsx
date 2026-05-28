@@ -37,6 +37,17 @@ export default function DetailSheet() {
     }
   }, [detailItem, series])
 
+  const [seasonInput, setSeasonInput] = useState('')
+  const [episodeInput, setEpisodeInput] = useState('')
+
+  // Sync inputs with item state
+  useEffect(() => {
+    if (detailItem) {
+      setSeasonInput(detailItem.currentSeason.toString())
+      setEpisodeInput(detailItem.currentEpisode.toString())
+    }
+  }, [detailItem?.id, detailItem?.currentSeason, detailItem?.currentEpisode])
+
   if (!detailItem) return null
   const item = detailItem
   const meta = STATUS_META[item.status]
@@ -189,11 +200,24 @@ export default function DetailSheet() {
                     <label className="text-[10px] text-white/40 uppercase font-semibold block mb-0.5">Season</label>
                     <input
                       type="number"
-                      value={item.currentSeason}
+                      value={seasonInput}
+                      onFocus={(e) => e.target.select()}
                       onChange={(e) => {
-                        const val = Math.max(1, parseInt(e.target.value, 10) || 1)
-                        updateItem(item.id, { currentSeason: val })
-                        setDetailItem({ ...item, currentSeason: val })
+                        const valStr = e.target.value
+                        setSeasonInput(valStr)
+                        const parsed = parseInt(valStr, 10)
+                        if (!isNaN(parsed)) {
+                          const val = Math.max(1, parsed)
+                          updateItem(item.id, { currentSeason: val })
+                          setDetailItem({ ...item, currentSeason: val })
+                        }
+                      }}
+                      onBlur={() => {
+                        if (seasonInput === '' || isNaN(parseInt(seasonInput, 10))) {
+                          setSeasonInput('1')
+                          updateItem(item.id, { currentSeason: 1 })
+                          setDetailItem({ ...item, currentSeason: 1 })
+                        }
                       }}
                       className="w-full bg-transparent text-white font-semibold outline-none border-b border-white/10 focus:border-violet-500 py-0.5 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                     />
@@ -203,11 +227,24 @@ export default function DetailSheet() {
                     <label className="text-[10px] text-white/40 uppercase font-semibold block mb-0.5">Episode</label>
                     <input
                       type="number"
-                      value={item.currentEpisode}
+                      value={episodeInput}
+                      onFocus={(e) => e.target.select()}
                       onChange={(e) => {
-                        const val = Math.max(0, parseInt(e.target.value, 10) || 0)
-                        updateItem(item.id, { currentEpisode: val })
-                        setDetailItem({ ...item, currentEpisode: val })
+                        const valStr = e.target.value
+                        setEpisodeInput(valStr)
+                        const parsed = parseInt(valStr, 10)
+                        if (!isNaN(parsed)) {
+                          const val = Math.max(0, parsed)
+                          updateItem(item.id, { currentEpisode: val })
+                          setDetailItem({ ...item, currentEpisode: val })
+                        }
+                      }}
+                      onBlur={() => {
+                        if (episodeInput === '' || isNaN(parseInt(episodeInput, 10))) {
+                          setEpisodeInput('0')
+                          updateItem(item.id, { currentEpisode: 0 })
+                          setDetailItem({ ...item, currentEpisode: 0 })
+                        }
                       }}
                       className="w-full bg-transparent text-white font-semibold outline-none border-b border-white/10 focus:border-violet-500 py-0.5 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                     />
