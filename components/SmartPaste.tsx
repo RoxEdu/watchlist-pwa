@@ -2,14 +2,26 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, Loader2, Sparkles, Check, ChevronDown, ListPlus, Trash2 } from 'lucide-react'
+import { X, Loader2, Sparkles, Check, ChevronDown, ListPlus, Trash2, Edit2, AlertCircle, Search } from 'lucide-react'
 import { useUIStore } from '@/lib/store'
 import { db, addItem, getItemByImdbId } from '@/lib/db'
 import { pushItem } from '@/lib/sync'
 import { useAuth } from '@/hooks/useAuth'
-import type { MediaType, Status, WatchlistItem } from '@/lib/types'
+import type { MediaType, Status } from '@/lib/types'
 import { STATUS_META, MEDIA_TYPE_LABELS } from '@/lib/types'
 import Image from 'next/image'
+
+interface Alternative {
+  id: string
+  title: string
+  mediaType: MediaType
+  airingStatus: 'finished' | 'continuing'
+  posterUrl: string | null
+  year: number | null
+  genres: string[]
+  overview: string
+  rating: number | null
+}
 
 interface ParsedItem {
   id: string
@@ -24,6 +36,10 @@ interface ParsedItem {
   overview: string
   rating: number | null
   selected: boolean
+  isUnsure: boolean
+  isEditing?: boolean
+  editQuery?: string
+  alternatives: Alternative[]
 }
 
 // Simple Levenshtein distance string similarity helper
@@ -59,6 +75,198 @@ function getSimilarity(str1: string, str2: string): number {
   return maxLength === 0 ? 1.0 : 1.0 - distance / maxLength
 }
 
+// Checkbox and note strip helper
+function parseInputLine(line: string): { query: string; isCompleted: boolean } | null {
+  let clean = line.trim()
+  if (!clean) return null
+
+  // Strip leading list bullet markers and spacing (e.g. "- ", "* ", "1. ", "2) ")
+  clean = clean.replace(/^[\s\-\*\•\d+[\.\)]\s*/, '')
+
+  let isCompleted = false
+  // Detect checkboxes: [x], [X], [ ]
+  const checkboxMatch = clean.match(/^\[([ xX])\]\s*(.*)$/)
+  if (checkboxMatch) {
+    isCompleted = checkboxMatch[1].toLowerCase() === 'x'
+    clean = checkboxMatch[2].trim()
+  }
+
+  // Strip common trailing descriptors
+  if (clean.toLowerCase().endsWith(' movie')) {
+    clean = clean.substring(0, clean.length - 6).trim()
+  }
+  if (clean.toLowerCase().endsWith(' (series)')) {
+    clean = clean.substring(0, clean.length - 9).trim()
+  }
+
+  if (!clean) return null
+  return { query: clean, isCompleted }
+}
+
+// Queries endpoints and formats standard matches and alternatives
+async function scanSingleTitle(query: string, isCompleted: boolean, currentIndex: number): Promise<ParsedItem> {
+  const [tvmazeRes, itunesRes] = await Promise.all([
+    fetch(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(query)}`).then((r) =>
+      r.ok ? r.json() : [],
+    ).catch(() => []),
+    fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(query)}&limit=5&country=us`).then((r) =>
+      r.ok ? r.json() : { results: [] },
+    ).catch(() => ({ results: [] })),
+  ])
+
+  // Parse TVMaze results
+  const tvShows = (tvmazeRes ?? []).slice(0, 3).map((item: any) => {
+    const show = item.show
+    const similarity = Math.max(
+      getSimilarity(query, show.name),
+      show.english_name ? getSimilarity(query, show.english_name) : 0,
+    )
+    const isAnime =
+      show.language === 'Japanese' ||
+      show.genres?.includes('Anime') ||
+      show.type === 'Animation'
+
+    return {
+      id: show.externals?.imdb || `tvmaze-${show.id}`,
+      title: show.name,
+      mediaType: (isAnime ? 'anime' : 'series') as MediaType,
+      airingStatus: (show.status === 'Ended' ? 'finished' : 'continuing') as 'finished' | 'continuing',
+      posterUrl: show.image?.medium ?? null,
+      year: show.premiered ? parseInt(show.premiered.split('-')[0]) : null,
+      genres: show.genres ?? [],
+      overview: show.summary?.replace(/<[^>]+>/g, '') ?? '',
+      rating: show.rating?.average ?? null,
+      similarity
+    }
+  })
+
+  // Parse iTunes results (movies only)
+  const itunesMovies = (itunesRes?.results ?? [])
+    .filter((r: any) => r.kind === 'feature-movie')
+    .slice(0, 3)
+    .map((movie: any) => {
+      const similarity = getSimilarity(query, movie.trackName)
+      return {
+        id: movie.trackId ? `itunes-movie-${movie.trackId}` : `movie-custom-${Date.now()}-${currentIndex}-${Math.random()}`,
+        title: movie.trackName,
+        mediaType: 'movie' as MediaType,
+        airingStatus: 'finished' as const,
+        posterUrl: movie.artworkUrl100 ? movie.artworkUrl100.replace(/\d+x\d+bb/, '300x450bb') : null,
+        year: movie.releaseDate ? parseInt(movie.releaseDate.split('-')[0]) : null,
+        genres: [] as string[],
+        overview: movie.longDescription ?? movie.shortDescription ?? '',
+        rating: null,
+        similarity
+      }
+    })
+
+  // Sort candidates by string similarity
+  const allCandidates = [...tvShows, ...itunesMovies].sort((a, b) => b.similarity - a.similarity)
+
+  // Custom manual fallbacks
+  const customMovie = {
+    id: `custom-movie-${Date.now()}-${currentIndex}`,
+    title: query,
+    mediaType: 'movie' as MediaType,
+    airingStatus: 'finished' as const,
+    posterUrl: null,
+    year: null,
+    genres: [],
+    overview: 'Custom Movie entry created via Smart Paste.',
+    rating: null,
+    similarity: 0.1
+  }
+
+  const customSeries = {
+    id: `custom-series-${Date.now()}-${currentIndex}`,
+    title: query,
+    mediaType: 'series' as MediaType,
+    airingStatus: 'continuing' as const,
+    posterUrl: null,
+    year: null,
+    genres: [],
+    overview: 'Custom TV Series entry created via Smart Paste.',
+    rating: null,
+    similarity: 0.1
+  }
+
+  const bestCandidate = allCandidates[0]
+  const bestSimilarity = bestCandidate ? bestCandidate.similarity : 0
+  const isUnsure = bestSimilarity < 0.75
+
+  // De-duplicate alternatives
+  const uniqueAltsMap = new Map<string, Alternative>()
+  allCandidates.forEach((c) => {
+    uniqueAltsMap.set(c.id, {
+      id: c.id,
+      title: c.title,
+      mediaType: c.mediaType,
+      airingStatus: c.airingStatus,
+      posterUrl: c.posterUrl,
+      year: c.year,
+      genres: c.genres,
+      overview: c.overview,
+      rating: c.rating
+    })
+  })
+
+  // Append manual fallbacks to the list of alternatives
+  uniqueAltsMap.set(customMovie.id, {
+    id: customMovie.id,
+    title: customMovie.title,
+    mediaType: customMovie.mediaType,
+    airingStatus: customMovie.airingStatus,
+    posterUrl: customMovie.posterUrl,
+    year: customMovie.year,
+    genres: customMovie.genres,
+    overview: customMovie.overview,
+    rating: customMovie.rating
+  })
+  uniqueAltsMap.set(customSeries.id, {
+    id: customSeries.id,
+    title: customSeries.title,
+    mediaType: customSeries.mediaType,
+    airingStatus: customSeries.airingStatus,
+    posterUrl: customSeries.posterUrl,
+    year: customSeries.year,
+    genres: customSeries.genres,
+    overview: customSeries.overview,
+    rating: customSeries.rating
+  })
+
+  const finalAlternatives = Array.from(uniqueAltsMap.values())
+  const selectedMatch = bestCandidate || customMovie
+
+  // Status mapping logic
+  let defaultStatus: Status = 'want_to_watch'
+  if (isCompleted) {
+    defaultStatus = 'finished'
+  } else {
+    if (selectedMatch.mediaType === 'movie') {
+      defaultStatus = 'want_to_watch'
+    } else {
+      defaultStatus = selectedMatch.airingStatus === 'finished' ? 'finished' : 'watching'
+    }
+  }
+
+  return {
+    id: selectedMatch.id,
+    originalQuery: query,
+    title: selectedMatch.title,
+    mediaType: selectedMatch.mediaType,
+    status: defaultStatus,
+    airingStatus: selectedMatch.airingStatus,
+    posterUrl: selectedMatch.posterUrl,
+    year: selectedMatch.year,
+    genres: selectedMatch.genres,
+    overview: selectedMatch.overview,
+    rating: selectedMatch.rating,
+    selected: true,
+    isUnsure,
+    alternatives: finalAlternatives
+  }
+}
+
 export default function SmartPaste() {
   const { smartPasteOpen, setSmartPasteOpen } = useUIStore()
   const { user } = useAuth()
@@ -68,6 +276,7 @@ export default function SmartPaste() {
   const [progress, setProgress] = useState({ current: 0, total: 0, currentTitle: '' })
   const [parsedItems, setParsedItems] = useState<ParsedItem[]>([])
   const [importing, setImporting] = useState(false)
+  const [reScanningId, setReScanningId] = useState<string | null>(null)
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -84,122 +293,78 @@ export default function SmartPaste() {
 
   // Process pasted list
   async function handleScan() {
-    const lines = text
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0)
+    let rawItems: Array<{ query: string; isCompleted: boolean }> = []
 
-    if (lines.length === 0) return
-
-    setStep('scanning')
-    setProgress({ current: 0, total: lines.length, currentTitle: '' })
-
-    const results: ParsedItem[] = []
-
-    // Concurrency limit helper to run scans in batches of 2
-    const batchSize = 2
-    for (let i = 0; i < lines.length; i += batchSize) {
-      const batch = lines.slice(i, i + batchSize)
-      await Promise.all(
-        batch.map(async (query, idx) => {
-          const currentIndex = i + idx
-          setProgress((p) => ({ ...p, current: currentIndex, currentTitle: query }))
-
+    // 1. Flexible Delimiter Parsing
+    if (text.includes('\n')) {
+      rawItems = text
+        .split('\n')
+        .map(parseInputLine)
+        .filter((x): x is { query: string; isCompleted: boolean } => x !== null)
+    } else if (text.includes(',')) {
+      rawItems = text
+        .split(',')
+        .map(parseInputLine)
+        .filter((x): x is { query: string; isCompleted: boolean } => x !== null)
+    } else {
+      // Check if space separated
+      const trimmed = text.trim()
+      if (trimmed) {
+        const parsed = parseInputLine(trimmed)
+        if (parsed) {
+          // Pre-verify entire string
+          setStep('scanning')
+          setProgress({ current: 0, total: 1, currentTitle: parsed.query })
           try {
-            // 1. Search TVMaze and iTunes in parallel
-            const [tvmazeRes, itunesRes] = await Promise.all([
-              fetch(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(query)}`).then((r) =>
-                r.ok ? r.json() : [],
-              ).catch(() => []),
-              fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(query)}&limit=8&country=us`).then((r) =>
-                r.ok ? r.json() : { results: [] },
-              ).catch(() => ({ results: [] })),
-            ])
-
-            // Determine best match from TVMaze
-            const tvShow = tvmazeRes?.[0]?.show
-            let tvSimilarity = 0
-            if (tvShow) {
-              tvSimilarity = Math.max(
-                getSimilarity(query, tvShow.name),
-                tvShow.english_name ? getSimilarity(query, tvShow.english_name) : 0,
-              )
-            }
-
-            // Determine best match from iTunes (movies only)
-            const itunesMovies = (itunesRes?.results ?? []).filter((r: any) => r.kind === 'feature-movie')
-            const movie = itunesMovies?.[0]
-            let movieSimilarity = 0
-            if (movie) {
-              movieSimilarity = getSimilarity(query, movie.trackName)
-            }
-
-            // Decide category based on similarity and default fallback
-            if (tvShow && tvSimilarity >= movieSimilarity && tvSimilarity > 0.35) {
-              const isAnime =
-                tvShow.language === 'Japanese' ||
-                tvShow.genres?.includes('Anime') ||
-                tvShow.type === 'Animation'
-
-              const airingStatus = tvShow.status === 'Ended' ? 'finished' : 'continuing'
-              const defaultStatus: Status = isAnime
-                ? (airingStatus === 'finished' ? 'finished' : 'watching')
-                : (airingStatus === 'finished' ? 'finished' : 'watching')
-
-              results.push({
-                id: tvShow.externals?.imdb || `tvmaze-${tvShow.id}`,
-                originalQuery: query,
-                title: tvShow.name,
-                mediaType: isAnime ? 'anime' : 'series',
-                status: defaultStatus,
-                airingStatus,
-                posterUrl: tvShow.image?.medium ?? null,
-                year: tvShow.premiered ? parseInt(tvShow.premiered.split('-')[0]) : null,
-                genres: tvShow.genres ?? [],
-                overview: tvShow.summary?.replace(/<[^>]+>/g, '') ?? '',
-                rating: tvShow.rating?.average ?? null,
-                selected: true,
-              })
-            } else if (movie && movieSimilarity > 0.35) {
-              results.push({
-                id: movie.trackId ? `itunes-movie-${movie.trackId}` : `movie-custom-${Date.now()}-${currentIndex}`,
-                originalQuery: query,
-                title: movie.trackName,
-                mediaType: 'movie',
-                status: 'want_to_watch',
-                airingStatus: 'finished',
-                posterUrl: movie.artworkUrl100 ? movie.artworkUrl100.replace(/\d+x\d+bb/, '300x450bb') : null,
-                year: movie.releaseDate ? parseInt(movie.releaseDate.split('-')[0]) : null,
-                genres: [],
-                overview: movie.longDescription ?? movie.shortDescription ?? '',
-                rating: null,
-                selected: true,
-              })
-            } else {
-              // Fallback to manual-like item if no good match
-              results.push({
-                id: `fallback-${Date.now()}-${currentIndex}`,
-                originalQuery: query,
-                title: query,
-                mediaType: 'movie',
-                status: 'want_to_watch',
-                airingStatus: 'finished',
-                posterUrl: null,
-                year: null,
-                genres: [],
-                overview: 'No matching online details found.',
-                rating: null,
-                selected: true,
-              })
+            const scanResult = await scanSingleTitle(parsed.query, parsed.isCompleted, 0)
+            if (!scanResult.isUnsure) {
+              setParsedItems([scanResult])
+              setProgress({ current: 1, total: 1, currentTitle: 'Complete!' })
+              setStep('preview')
+              return
             }
           } catch {
-            // Fallback on request errors
+            // ignore
+          }
+
+          // Split by spaces if low-confidence or failed
+          const words = trimmed
+            .split(/\s+/)
+            .map(parseInputLine)
+            .filter((x): x is { query: string; isCompleted: boolean } => x !== null)
+
+          if (words.length > 1) {
+            rawItems = words
+          } else {
+            rawItems = [parsed]
+          }
+        }
+      }
+    }
+
+    if (rawItems.length === 0) return
+
+    setStep('scanning')
+    setProgress({ current: 0, total: rawItems.length, currentTitle: '' })
+
+    const results: ParsedItem[] = []
+    const batchSize = 2
+    for (let i = 0; i < rawItems.length; i += batchSize) {
+      const batch = rawItems.slice(i, i + batchSize)
+      await Promise.all(
+        batch.map(async (item, idx) => {
+          const currentIndex = i + idx
+          setProgress((p) => ({ ...p, current: currentIndex, currentTitle: item.query }))
+          try {
+            const scanResult = await scanSingleTitle(item.query, item.isCompleted, currentIndex)
+            results.push(scanResult)
+          } catch {
             results.push({
-              id: `fallback-err-${Date.now()}-${currentIndex}`,
-              originalQuery: query,
-              title: query,
+              id: `err-${Date.now()}-${currentIndex}`,
+              originalQuery: item.query,
+              title: item.query,
               mediaType: 'movie',
-              status: 'want_to_watch',
+              status: item.isCompleted ? 'finished' : 'want_to_watch',
               airingStatus: 'finished',
               posterUrl: null,
               year: null,
@@ -207,18 +372,43 @@ export default function SmartPaste() {
               overview: 'Search failed.',
               rating: null,
               selected: true,
+              isUnsure: true,
+              alternatives: [
+                {
+                  id: `err-movie-${Date.now()}-${currentIndex}`,
+                  title: item.query,
+                  mediaType: 'movie',
+                  airingStatus: 'finished',
+                  posterUrl: null,
+                  year: null,
+                  genres: [],
+                  overview: 'Custom Movie entry.',
+                  rating: null
+                },
+                {
+                  id: `err-series-${Date.now()}-${currentIndex}`,
+                  title: item.query,
+                  mediaType: 'series',
+                  airingStatus: 'continuing',
+                  posterUrl: null,
+                  year: null,
+                  genres: [],
+                  overview: 'Custom TV Series entry.',
+                  rating: null
+                }
+              ]
             })
           }
-        }),
+        })
       )
     }
 
-    setProgress((p) => ({ ...p, current: lines.length, currentTitle: 'Complete!' }))
+    setProgress((p) => ({ ...p, current: rawItems.length, currentTitle: 'Complete!' }))
     setParsedItems(results)
     setStep('preview')
   }
 
-  // Handle final import to database
+  // Handle final bulk database insertion
   async function handleImport() {
     const toImport = parsedItems.filter((item) => item.selected)
     if (toImport.length === 0) return
@@ -230,7 +420,6 @@ export default function SmartPaste() {
         const existing = await getItemByImdbId(item.id)
         if (existing) continue
 
-        const now = new Date()
         const newId = await addItem({
           imdbId: item.id,
           title: item.title,
@@ -249,7 +438,6 @@ export default function SmartPaste() {
           overview: item.overview,
         })
 
-        // Cloud sync if logged in
         if (user) {
           const saved = await db.items.get(newId)
           if (saved) await pushItem(saved).catch(() => {})
@@ -280,6 +468,79 @@ export default function SmartPaste() {
 
   function handleRemoveItem(index: number) {
     setParsedItems((prev) => prev.filter((_, idx) => idx !== index))
+  }
+
+  // Inline correction / editing functions
+  function handleStartEditing(index: number) {
+    setParsedItems((prev) =>
+      prev.map((item, idx) =>
+        idx === index ? { ...item, isEditing: true, editQuery: item.title } : item,
+      )
+    )
+  }
+
+  function handleCancelEditing(index: number) {
+    setParsedItems((prev) =>
+      prev.map((item, idx) =>
+        idx === index ? { ...item, isEditing: false, editQuery: undefined } : item,
+      )
+    )
+  }
+
+  function handleEditQueryChange(index: number, val: string) {
+    setParsedItems((prev) =>
+      prev.map((item, idx) => (idx === index ? { ...item, editQuery: val } : item)),
+    )
+  }
+
+  async function handleRescan(index: number, newQuery: string) {
+    if (!newQuery.trim()) return
+    const item = parsedItems[index]
+    setReScanningId(item.id)
+    try {
+      const updated = await scanSingleTitle(newQuery, item.status === 'finished', index)
+      setParsedItems((prev) =>
+        prev.map((p, idx) =>
+          idx === index ? { ...updated, isEditing: false, editQuery: undefined } : p,
+        )
+      )
+    } catch {
+      alert('Rescan failed.')
+    } finally {
+      setReScanningId(null)
+    }
+  }
+
+  function handleSelectAlternative(index: number, alt: Alternative) {
+    setParsedItems((prev) =>
+      prev.map((item, idx) => {
+        if (idx !== index) return item
+
+        let defaultStatus = item.status
+        if (item.status !== 'finished') {
+          if (alt.mediaType === 'movie') {
+            defaultStatus = 'want_to_watch'
+          } else {
+            defaultStatus = alt.airingStatus === 'finished' ? 'finished' : 'watching'
+          }
+        }
+
+        return {
+          ...item,
+          id: alt.id,
+          title: alt.title,
+          mediaType: alt.mediaType,
+          airingStatus: alt.airingStatus,
+          posterUrl: alt.posterUrl,
+          year: alt.year,
+          genres: alt.genres,
+          overview: alt.overview,
+          rating: alt.rating,
+          status: defaultStatus,
+          isUnsure: false, // user resolved the match manually
+        }
+      })
+    )
   }
 
   const selectedCount = parsedItems.filter((i) => i.selected).length
@@ -328,13 +589,13 @@ export default function SmartPaste() {
             {step === 'input' && (
               <div className="flex flex-col flex-1 overflow-hidden p-4">
                 <p className="text-white/40 text-xs leading-relaxed mb-3">
-                  Paste your list of movies, shows, or anime below (one title per line). We will automatically match their details, classify their type, detect if they are finished or continuing, and sort them.
+                  Paste your list of movies, shows, or anime. Supports checkboxes (`- [x] Finished`), newlines, commas, or spaces. We will automatically classify their type, airing status, and sort them.
                 </p>
                 <textarea
                   ref={textareaRef}
                   value={text}
                   onChange={(e) => setText(e.target.value)}
-                  placeholder="e.g.&#13;Attack on Titan&#13;Breaking Bad&#13;Interstellar&#13;Frieren"
+                  placeholder="e.g.&#13;- [x] Cyberpunk Edgerunners&#13;- [ ] Jujutsu Kaisen&#13;Inception, Interstellar, Frieren"
                   className="flex-1 min-h-[160px] bg-white/5 border border-white/8 rounded-xl px-4 py-3 text-white placeholder:text-white/20 outline-none focus:border-violet-500/60 text-sm transition-colors resize-none font-mono"
                 />
                 <button
@@ -397,80 +658,157 @@ export default function SmartPaste() {
                       return (
                         <div
                           key={item.id}
-                          className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${
+                          className={`flex flex-col p-3 rounded-xl border transition-all ${
                             item.selected
                               ? 'bg-white/5 border-white/10'
                               : 'bg-black/10 border-white/5 opacity-50'
                           }`}
                         >
-                          {/* Checkbox */}
-                          <button
-                            onClick={() => handleToggleSelect(idx)}
-                            className={`h-5 w-5 rounded flex items-center justify-center border transition-all ${
-                              item.selected
-                                ? 'bg-violet-600 border-violet-500 text-white'
-                                : 'border-white/20 text-transparent hover:border-white/40'
-                            }`}
-                          >
-                            <Check size={12} strokeWidth={3} />
-                          </button>
+                          <div className="flex items-center gap-3 w-full">
+                            {/* Checkbox */}
+                            <button
+                              onClick={() => handleToggleSelect(idx)}
+                              className={`h-5 w-5 rounded flex items-center justify-center flex-shrink-0 border transition-all ${
+                                item.selected
+                                  ? 'bg-violet-600 border-violet-500 text-white'
+                                  : 'border-white/20 text-transparent hover:border-white/40'
+                              }`}
+                            >
+                              <Check size={12} strokeWidth={3} />
+                            </button>
 
-                          {/* Image */}
-                          <div className="relative h-12 w-8 bg-white/5 rounded overflow-hidden flex-shrink-0">
-                            {item.posterUrl ? (
-                              <Image
-                                src={item.posterUrl}
-                                alt={item.title}
-                                fill
-                                className="object-cover"
-                                sizes="32px"
-                              />
+                            {/* Main Body */}
+                            {item.isEditing ? (
+                              <div className="flex-1 flex gap-2 items-center min-w-0">
+                                <input
+                                  type="text"
+                                  value={item.editQuery || ''}
+                                  onChange={(e) => handleEditQueryChange(idx, e.target.value)}
+                                  className="flex-1 bg-black/40 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-violet-500 min-w-0 font-mono"
+                                  placeholder="Fix title and rescan..."
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') handleRescan(idx, item.editQuery || '')
+                                  }}
+                                />
+                                <button
+                                  disabled={reScanningId === item.id}
+                                  onClick={() => handleRescan(idx, item.editQuery || '')}
+                                  className="px-2.5 py-1.5 bg-violet-600 hover:bg-violet-500 disabled:bg-violet-700 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 transition-colors flex-shrink-0"
+                                >
+                                  {reScanningId === item.id ? (
+                                    <Loader2 size={10} className="animate-spin" />
+                                  ) : (
+                                    <Search size={10} />
+                                  )}
+                                  Scan
+                                </button>
+                                <button
+                                  onClick={() => handleCancelEditing(idx)}
+                                  className="px-2 py-1.5 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white rounded-lg text-[10px] transition-colors flex-shrink-0"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
                             ) : (
-                              <div className="flex h-full items-center justify-center text-white/20 text-xs">🎬</div>
+                              <>
+                                {/* Image */}
+                                <div className="relative h-12 w-8 bg-white/5 rounded overflow-hidden flex-shrink-0">
+                                  {item.posterUrl ? (
+                                    <Image
+                                      src={item.posterUrl}
+                                      alt={item.title}
+                                      fill
+                                      className="object-cover"
+                                      sizes="32px"
+                                    />
+                                  ) : (
+                                    <div className="flex h-full items-center justify-center text-white/20 text-xs">🎬</div>
+                                  )}
+                                </div>
+
+                                {/* Details */}
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <h4 className="text-white text-xs font-semibold truncate leading-tight">
+                                      {item.title}
+                                    </h4>
+                                    {item.isUnsure && (
+                                      <span className="flex-shrink-0 rounded bg-amber-500/10 text-amber-500 text-[8px] font-bold px-1 py-0.5 border border-amber-500/20 uppercase tracking-wider">
+                                        Unsure
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-[10px] text-white/40 mt-0.5 truncate flex items-center gap-1">
+                                    <span>{typeLabel}</span>
+                                    {item.year ? <span>· {item.year}</span> : null}
+                                    {item.mediaType !== 'movie' ? <span>({airLabel})</span> : null}
+                                    <button
+                                      onClick={() => handleStartEditing(idx)}
+                                      className="inline-flex items-center text-violet-400 hover:text-violet-300 ml-1.5 text-[9px] hover:underline cursor-pointer"
+                                    >
+                                      <Edit2 size={8} className="mr-0.5" /> Edit
+                                    </button>
+                                  </p>
+                                </div>
+
+                                {/* Controls */}
+                                <div className="flex items-center gap-2 flex-shrink-0">
+                                  <div className="relative">
+                                    <select
+                                      value={item.status}
+                                      onChange={(e) => handleChangeStatus(idx, e.target.value as Status)}
+                                      className={`appearance-none bg-white/5 text-[11px] font-semibold ${meta.color} rounded-lg pl-2.5 pr-6 py-1.5 border border-white/10 outline-none focus:border-violet-500/50`}
+                                    >
+                                      {Object.keys(STATUS_META).map((statusKey) => (
+                                        <option key={statusKey} value={statusKey} className="bg-[#0f0f11] text-white">
+                                          {STATUS_META[statusKey as Status].label}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <ChevronDown
+                                      size={10}
+                                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/40 pointer-events-none"
+                                    />
+                                  </div>
+
+                                  <button
+                                    onClick={() => handleRemoveItem(idx)}
+                                    className="p-1.5 rounded-lg text-white/30 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                                  >
+                                    <Trash2 size={12} />
+                                  </button>
+                                </div>
+                              </>
                             )}
                           </div>
 
-                          {/* Details */}
-                          <div className="flex-1 min-w-0">
-                            <h4 className="text-white text-xs font-semibold truncate leading-tight">
-                              {item.title}
-                            </h4>
-                            <p className="text-[10px] text-white/40 mt-0.5 truncate">
-                              {typeLabel}
-                              {item.year ? ` · ${item.year}` : ''}
-                              {item.mediaType !== 'movie' ? ` (${airLabel})` : ''}
-                            </p>
-                          </div>
-
-                          {/* Controls */}
-                          <div className="flex items-center gap-2">
-                            {/* Dropdown status picker */}
-                            <div className="relative">
-                              <select
-                                value={item.status}
-                                onChange={(e) => handleChangeStatus(idx, e.target.value as Status)}
-                                className={`appearance-none bg-white/5 text-[11px] font-semibold ${meta.color} rounded-lg pl-2.5 pr-6 py-1.5 border border-white/10 outline-none focus:border-violet-500/50`}
-                              >
-                                {Object.keys(STATUS_META).map((statusKey) => (
-                                  <option key={statusKey} value={statusKey} className="bg-[#0f0f11] text-white">
-                                    {STATUS_META[statusKey as Status].label}
-                                  </option>
+                          {/* Alternatives UI (If Unsure) */}
+                          {!item.isEditing && item.isUnsure && item.alternatives && item.alternatives.length > 0 && (
+                            <div className="mt-2.5 ml-8 p-3 bg-white/5 border border-white/8 rounded-xl space-y-2">
+                              <span className="text-[9px] text-white/50 font-bold tracking-wide uppercase flex items-center gap-1">
+                                <AlertCircle size={10} className="text-amber-500" /> Did you mean?
+                              </span>
+                              <div className="flex flex-col gap-1.5">
+                                {item.alternatives.map((alt) => (
+                                  <button
+                                    key={alt.id}
+                                    onClick={() => handleSelectAlternative(idx, alt)}
+                                    className="w-full text-left text-xs px-3 py-2 rounded-lg bg-black/30 hover:bg-black/50 border border-white/5 hover:border-violet-500/30 transition-all flex items-center justify-between gap-2"
+                                  >
+                                    <div className="min-w-0">
+                                      <span className="text-white font-medium block truncate text-[11px]">{alt.title}</span>
+                                      <span className="text-[9px] text-white/40 block">
+                                        {alt.mediaType.toUpperCase()} {alt.year ? `· ${alt.year}` : ''} {alt.mediaType !== 'movie' ? `(${alt.airingStatus === 'finished' ? 'Ended' : 'Running'})` : ''}
+                                      </span>
+                                    </div>
+                                    <div className="rounded-full bg-white/5 px-2 py-0.5 text-[9px] font-bold text-violet-400 border border-violet-500/10 flex-shrink-0">
+                                      Select
+                                    </div>
+                                  </button>
                                 ))}
-                              </select>
-                              <ChevronDown
-                                size={10}
-                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/40 pointer-events-none"
-                              />
+                              </div>
                             </div>
-
-                            {/* Trash button to exclude */}
-                            <button
-                              onClick={() => handleRemoveItem(idx)}
-                              className="p-1.5 rounded-lg text-white/30 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                            >
-                              <Trash2 size={12} />
-                            </button>
-                          </div>
+                          )}
                         </div>
                       )
                     })
