@@ -1,12 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import Image from 'next/image'
 import { X, Plus, Minus, Star, Trash2 } from 'lucide-react'
 import { STATUS_META, STATUS_ORDER, MEDIA_TYPE_LABELS, type Status } from '@/lib/types'
 import { useUIStore } from '@/lib/store'
-import { setStatus, updateItem, removeFromWatchlist, incrementEpisode } from '@/hooks/useWatchlist'
+import { setStatus, updateItem, removeFromWatchlist, incrementEpisode, getEpisodesInSeason } from '@/hooks/useWatchlist'
+import { db } from '@/lib/db'
 import { cn } from '@/lib/utils'
 
 const STATUS_ICONS: Record<Status, string> = {
@@ -28,6 +29,13 @@ export default function DetailSheet() {
   const item = detailItem
   const meta = STATUS_META[item.status]
   const series = item.type === 'series' || item.type === 'anime' || item.type === 'mini_series'
+
+  // Pre-fetch episodes metadata in background
+  useEffect(() => {
+    if (series && item.imdbId) {
+      getEpisodesInSeason(item.imdbId, item.type, item.currentSeason).catch(() => {})
+    }
+  }, [item.imdbId, item.type, item.currentSeason, series])
 
   return (
     <AnimatePresence>
@@ -172,9 +180,10 @@ export default function DetailSheet() {
                     <Minus size={14} />
                   </button>
                   <button
-                    onClick={() => {
-                      incrementEpisode(item)
-                      setDetailItem({ ...item, currentEpisode: item.currentEpisode + 1 })
+                    onClick={async () => {
+                      await incrementEpisode(item)
+                      const updated = await db.items.get(item.id)
+                      if (updated) setDetailItem(updated)
                     }}
                     className="p-2 rounded-full bg-emerald-600 text-white"
                   >

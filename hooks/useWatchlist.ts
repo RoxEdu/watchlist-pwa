@@ -219,9 +219,95 @@ export async function setStatus(id: number, status: Status): Promise<void> {
   if (updated) pushItem(updated).catch(() => {})
 }
 
+// Cache of show/anime ID -> season episode counts
+const metadataCache: Record<string, Record<number, number>> = {}
+
+export async function getEpisodesInSeason(
+  imdbId: string,
+  type: MediaType,
+  season: number
+): Promise<number | null> {
+  if (!imdbId) return null
+  
+  if (metadataCache[imdbId]) {
+    return metadataCache[imdbId][season] ?? null
+  }
+  
+  try {
+    const cached = localStorage.getItem(`episodes_${imdbId}`)
+    if (cached) {
+      const parsed = JSON.parse(cached)
+      metadataCache[imdbId] = parsed
+      return parsed[season] ?? null
+    }
+  } catch {}
+
+  try {
+    const seasonMap: Record<number, number> = {}
+    
+    if (imdbId.startsWith('tt')) {
+      const lookupRes = await fetch(`https://api.tvmaze.com/lookup/shows?imdb=${imdbId}`)
+      if (lookupRes.ok) {
+        const show = await lookupRes.json()
+        const showId = show.id
+        const epsRes = await fetch(`https://api.tvmaze.com/shows/${showId}/episodes`)
+        if (epsRes.ok) {
+          const episodes = await epsRes.json()
+          episodes.forEach((ep: any) => {
+            const s = ep.season ?? 1
+            seasonMap[s] = (seasonMap[s] ?? 0) + 1
+          })
+        }
+      }
+    } else if (imdbId.startsWith('jikan-')) {
+      const malId = imdbId.replace('jikan-', '')
+      const malRes = await fetch(`https://api.jikan.moe/v4/anime/${malId}`)
+      if (malRes.ok) {
+        const json = await malRes.json()
+        const totalEp = json.data?.episodes ?? null
+        if (totalEp) {
+          seasonMap[1] = totalEp
+        }
+      }
+    } else if (imdbId.startsWith('tvmaze-')) {
+      const showId = imdbId.replace('tvmaze-', '')
+      const epsRes = await fetch(`https://api.tvmaze.com/shows/${showId}/episodes`)
+      if (epsRes.ok) {
+        const episodes = await epsRes.json()
+        episodes.forEach((ep: any) => {
+          const s = ep.season ?? 1
+          seasonMap[s] = (seasonMap[s] ?? 0) + 1
+        })
+      }
+    }
+
+    if (Object.keys(seasonMap).length > 0) {
+      metadataCache[imdbId] = seasonMap
+      try {
+        localStorage.setItem(`episodes_${imdbId}`, JSON.stringify(seasonMap))
+      } catch {}
+      return seasonMap[season] ?? null
+    }
+  } catch (err) {
+    console.error('Error fetching season/episode metadata:', err)
+  }
+
+  return null
+}
+
 export async function incrementEpisode(item: WatchlistItem): Promise<void> {
+  let nextEpisode = item.currentEpisode + 1
+  let nextSeason = item.currentSeason
+
+  const episodesInCurrentSeason = await getEpisodesInSeason(item.imdbId, item.type, item.currentSeason)
+  if (episodesInCurrentSeason !== null && nextEpisode > episodesInCurrentSeason) {
+    nextSeason = item.currentSeason + 1
+    nextEpisode = 1
+  }
+
   await updateItem(item.id, {
-    currentEpisode: item.currentEpisode + 1,
+    currentSeason: nextSeason,
+    currentEpisode: nextEpisode,
     status: item.status === 'want_to_watch' ? 'watching' : item.status,
   })
   const updated = await db.items.get(item.id)
