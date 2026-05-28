@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import Image from 'next/image'
 import { X, Plus, Minus, Star, Trash2 } from 'lucide-react'
-import { STATUS_META, STATUS_ORDER, MEDIA_TYPE_LABELS, type Status } from '@/lib/types'
+import { STATUS_META, STATUS_ORDER, MEDIA_TYPE_LABELS, type Status, type MediaType } from '@/lib/types'
 import { useUIStore } from '@/lib/store'
 import { setStatus, updateItem, removeFromWatchlist, incrementEpisode, getEpisodesInSeason } from '@/hooks/useWatchlist'
 import { db } from '@/lib/db'
@@ -22,8 +22,9 @@ const STATUS_ICONS: Record<Status, string> = {
 export default function DetailSheet() {
   const { detailItem, setDetailItem } = useUIStore()
   const [showStatusPicker, setShowStatusPicker] = useState(false)
+  const [showTypePicker, setShowTypePicker] = useState(false)
 
-  function close() { setDetailItem(null); setShowStatusPicker(false) }
+  function close() { setDetailItem(null); setShowStatusPicker(false); setShowTypePicker(false) }
 
   const series = detailItem
     ? detailItem.type === 'series' || detailItem.type === 'anime' || detailItem.type === 'mini_series'
@@ -44,7 +45,7 @@ export default function DetailSheet() {
   return (
     <AnimatePresence>
       <motion.div
-        className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm"
+        className="fixed inset-0 z-40 bg-black/80 backdrop-blur-sm"
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         onClick={close}
       />
@@ -132,6 +133,46 @@ export default function DetailSheet() {
                         </button>
                       )
                     })}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Media Type */}
+          <div className="mt-4">
+            <p className="text-xs text-white/40 uppercase tracking-widest mb-2">Media Type</p>
+            <button
+              onClick={() => setShowTypePicker((v) => !v)}
+              className="flex items-center gap-2 rounded-xl px-4 py-3 w-full text-left bg-white/5 border border-white/10 hover:bg-white/8 transition-all cursor-pointer"
+            >
+              <span className="text-xl">📺</span>
+              <span className="font-semibold text-white">{MEDIA_TYPE_LABELS[item.type]}</span>
+              <span className="ml-auto text-white/30 text-sm">tap to change</span>
+            </button>
+
+            <AnimatePresence>
+              {showTypePicker && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    {(Object.keys(MEDIA_TYPE_LABELS) as MediaType[]).filter((t) => t !== item.type).map((t) => (
+                      <button
+                        key={t}
+                        onClick={async () => {
+                          await updateItem(item.id, { type: t })
+                          setDetailItem({ ...item, type: t })
+                          setShowTypePicker(false)
+                        }}
+                        className="flex items-center gap-2 rounded-xl px-3 py-2.5 bg-white/5 border border-white/10 hover:bg-white/8 text-left transition-all cursor-pointer"
+                      >
+                        <span className="text-xs font-medium text-white/80">{MEDIA_TYPE_LABELS[t]}</span>
+                      </button>
+                    ))}
                   </div>
                 </motion.div>
               )}
