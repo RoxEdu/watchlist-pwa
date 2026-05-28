@@ -25,17 +25,21 @@ export default function DetailSheet() {
 
   function close() { setDetailItem(null); setShowStatusPicker(false) }
 
-  if (!detailItem) return null
-  const item = detailItem
-  const meta = STATUS_META[item.status]
-  const series = item.type === 'series' || item.type === 'anime' || item.type === 'mini_series'
+  const series = detailItem
+    ? detailItem.type === 'series' || detailItem.type === 'anime' || detailItem.type === 'mini_series'
+    : false
 
   // Pre-fetch episodes metadata in background
   useEffect(() => {
-    if (series && item.imdbId) {
-      getEpisodesInSeason(item.imdbId, item.type, item.currentSeason).catch(() => {})
+    if (series && detailItem && detailItem.imdbId) {
+      getEpisodesInSeason(detailItem.imdbId, detailItem.type, detailItem.currentSeason).catch(() => {})
     }
-  }, [item.imdbId, item.type, item.currentSeason, series])
+  }, [detailItem, series])
+
+  if (!detailItem) return null
+  const item = detailItem
+  const meta = STATUS_META[item.status]
+
 
   return (
     <AnimatePresence>
