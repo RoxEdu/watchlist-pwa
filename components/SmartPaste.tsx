@@ -105,32 +105,16 @@ function parseInputLine(line: string): { query: string; isCompleted: boolean } |
 }
 
 // Queries endpoints and formats standard matches and alternatives
-// Helper to parse JSONP-style suggestion response from IMDb
-function parseImdbSuggestions(text: string): any[] {
-  const start = text.indexOf('(')
-  const end = text.lastIndexOf(')')
-  if (start === -1 || end === -1) return []
-  try {
-    const jsonStr = text.substring(start + 1, end)
-    const data = JSON.parse(jsonStr)
-    return data.d ?? []
-  } catch {
-    return []
-  }
-}
-
-// Queries endpoints and formats standard matches and alternatives
 async function scanSingleTitle(query: string, isCompleted: boolean, currentIndex: number): Promise<ParsedItem> {
   const cleanQuery = query.trim().toLowerCase()
-  const char = cleanQuery[0]
   
-  const imdbPromise = /[a-z0-9]/.test(char)
-    ? fetch(`https://v3.sg.media-imdb.com/suggests/${char}/${encodeURIComponent(cleanQuery)}.json`)
-        .then((r) => (r.ok ? r.text() : ''))
-        .catch(() => '')
-    : Promise.resolve('')
+  const imdbPromise = cleanQuery
+    ? fetch(`/api/imdb?q=${encodeURIComponent(cleanQuery)}`)
+        .then((r) => (r.ok ? r.json() : []))
+        .catch(() => [])
+    : Promise.resolve([])
 
-  const [tvmazeRes, itunesRes, jikanRes, imdbText] = await Promise.all([
+  const [tvmazeRes, itunesRes, jikanRes, imdbItems] = await Promise.all([
     fetch(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(query)}`).then((r) =>
       r.ok ? r.json() : [],
     ).catch(() => []),
@@ -142,8 +126,6 @@ async function scanSingleTitle(query: string, isCompleted: boolean, currentIndex
     ).catch(() => ({ data: [] })),
     imdbPromise,
   ])
-
-  const imdbItems = parseImdbSuggestions(imdbText)
 
   // Parse TVMaze results
   const tvShows = (tvmazeRes ?? []).slice(0, 3).map((item: any) => {

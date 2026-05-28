@@ -132,19 +132,6 @@ interface ImdbSuggestionItem {
   i?: [string, number, number]
 }
 
-function parseImdbSuggestions(text: string): ImdbSuggestionItem[] {
-  const start = text.indexOf('(')
-  const end = text.lastIndexOf(')')
-  if (start === -1 || end === -1) return []
-  try {
-    const jsonStr = text.substring(start + 1, end)
-    const data = JSON.parse(jsonStr)
-    return data.d ?? []
-  } catch {
-    return []
-  }
-}
-
 function mapImdb(item: ImdbSuggestionItem): TMDBSearchResult {
   let mediaType: 'movie' | 'tv' | 'anime' = 'movie'
   if (item.qid === 'tvSeries' || item.qid === 'tvMiniSeries') {
@@ -165,13 +152,11 @@ async function searchImdb(query: string, limit = 8): Promise<TMDBSearchResult[]>
   try {
     const cleanQuery = query.toLowerCase().trim()
     if (!cleanQuery) return []
-    const char = cleanQuery[0]
-    if (!/[a-z0-9]/.test(char)) return []
-    const url = `https://v3.sg.media-imdb.com/suggests/${char}/${encodeURIComponent(cleanQuery)}.json`
-    const res = await fetch(url)
+    
+    const res = await fetch(`/api/imdb?q=${encodeURIComponent(cleanQuery)}`)
     if (!res.ok) return []
-    const text = await res.text()
-    const items = parseImdbSuggestions(text)
+    const items: ImdbSuggestionItem[] = await res.json()
+    
     return items
       .filter((item) => {
         if (!item.id.startsWith('tt')) return false
