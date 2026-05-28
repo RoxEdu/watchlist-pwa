@@ -59,6 +59,7 @@ interface TVMazeShow {
   image?: { medium: string } | null
   summary?: string | null
   rating?: { average: number | null }
+  externals?: { imdb?: string | null }
 }
 
 async function tvMazeSearch(query: string, limit = 8): Promise<TMDBSearchResult[]> {
@@ -69,7 +70,7 @@ async function tvMazeSearch(query: string, limit = 8): Promise<TMDBSearchResult[
     if (!res.ok) return []
     const data: Array<{ show: TVMazeShow }> = await res.json()
     return data.slice(0, limit).map(({ show }) => ({
-      tmdbId: `tvmaze-${show.id}`,
+      tmdbId: show.externals?.imdb || `tvmaze-${show.id}`,
       title: show.name,
       year: yearFrom(show.premiered),
       mediaType: 'tv' as const,
@@ -106,21 +107,134 @@ function mapJikan(a: JikanAnime): TMDBSearchResult {
   }
 }
 
+async function searchJikanAnime(query: string, limit = 6): Promise<TMDBSearchResult[]> {
+  try {
+    const res = await fetch(
+      `https://api.jikan.moe/v4/anime?q=${encodeURIComponent(query)}&limit=${limit}`,
+    )
+    if (!res.ok) return []
+    const json: { data: JikanAnime[] } = await res.json()
+    return (json.data ?? []).map(mapJikan)
+  } catch {
+    return []
+  }
+}
+
+// ─── IMDb Suggestions (keyless autocomplete) ──────────────────────────────────
+
+interface ImdbSuggestionItem {
+  id: string
+  l: string
+  q?: string
+  qid?: string
+  s?: string
+  y?: number
+  i?: [string, number, number]
+}
+
+function parseImdbSuggestions(text: string): ImdbSuggestionItem[] {
+  const start = text.indexOf('(')
+  const end = text.lastIndexOf(')')
+  if (start === -1 || end === -1) return []
+  try {
+    const jsonStr = text.substring(start + 1, end)
+    const data = JSON.parse(jsonStr)
+    return data.d ?? []
+  } catch {
+    return []
+  }
+}
+
+function mapImdb(item: ImdbSuggestionItem): TMDBSearchResult {
+  let mediaType: 'movie' | 'tv' | 'anime' = 'movie'
+  if (item.qid === 'tvSeries' || item.qid === 'tvMiniSeries') {
+    mediaType = 'tv'
+  }
+  return {
+    tmdbId: item.id,
+    title: item.l,
+    year: item.y ? String(item.y) : null,
+    mediaType,
+    posterUrl: item.i ? item.i[0] : null,
+    overview: item.s ? `Starring: ${item.s}` : '',
+    rating: null,
+  }
+}
+
+async function searchImdb(query: string, limit = 8): Promise<TMDBSearchResult[]> {
+  try {
+    const cleanQuery = query.toLowerCase().trim()
+    if (!cleanQuery) return []
+    const char = cleanQuery[0]
+    if (!/[a-z0-9]/.test(char)) return []
+    const url = `https://v3.sg.media-imdb.com/suggests/${char}/${encodeURIComponent(cleanQuery)}.json`
+    const res = await fetch(url)
+    if (!res.ok) return []
+    const text = await res.text()
+    const items = parseImdbSuggestions(text)
+    return items
+      .filter((item) => {
+        if (!item.id.startsWith('tt')) return false
+        if (item.qid === 'videoGame' || item.q === 'video game') return false
+        return true
+      })
+      .slice(0, limit)
+      .map(mapImdb)
+  } catch {
+    return []
+  }
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-// Unified search: iTunes movies + TVMaze shows, interleaved
+// Unified search: IMDb suggests + iTunes movies + TVMaze shows + Jikan anime, interleaved & deduped
 export async function searchTMDB(query: string): Promise<TMDBSearchResult[]> {
-  const [movies, shows] = await Promise.all([
+  const [imdbResults, movies, shows, anime] = await Promise.all([
+    searchImdb(query, 8),
     searchItunesMovies(query, 6),
     tvMazeSearch(query, 6),
+    searchJikanAnime(query, 6),
   ])
   const out: TMDBSearchResult[] = []
-  const max = Math.max(movies.length, shows.length)
+  const max = Math.max(imdbResults.length, movies.length, shows.length, anime.length)
   for (let i = 0; i < max; i++) {
+    if (imdbResults[i]) out.push(imdbResults[i])
     if (movies[i]) out.push(movies[i])
     if (shows[i]) out.push(shows[i])
+    if (anime[i]) out.push(anime[i])
   }
-  return out
+
+  // Deduplicate by ID and normalized title
+  const seenIds = new Set<string>()
+  const seenTitles = new Set<string>()
+  const deduped: TMDBSearchResult[] = []
+
+  for (const item of out) {
+    if (item.tmdbId.startsWith('tt')) {
+      if (seenIds.has(item.tmdbId)) continue
+      seenIds.add(item.tmdbId)
+    }
+    const normTitle = item.title.toLowerCase().replace(/[^a-z0-9]/g, '')
+    const titleKey = `${normTitle}-${item.mediaType}`
+    if (seenTitles.has(titleKey)) {
+      const existingIdx = deduped.findIndex(
+        (d) =>
+          d.title.toLowerCase().replace(/[^a-z0-9]/g, '') === normTitle &&
+          d.mediaType === item.mediaType,
+      )
+      if (existingIdx !== -1) {
+        const existing = deduped[existingIdx]
+        if (item.tmdbId.startsWith('tt') && !existing.tmdbId.startsWith('tt')) {
+          deduped[existingIdx] = item
+        }
+      }
+      continue
+    }
+    seenTitles.add(titleKey)
+    deduped.push(item)
+  }
+
+  return deduped
 }
 
 const CURATED_MOVIES = [

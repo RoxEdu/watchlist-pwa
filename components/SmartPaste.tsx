@@ -37,6 +37,7 @@ interface ParsedItem {
   rating: number | null
   selected: boolean
   isUnsure: boolean
+  isCompleted: boolean
   isEditing?: boolean
   editQuery?: string
   alternatives: Alternative[]
@@ -104,15 +105,45 @@ function parseInputLine(line: string): { query: string; isCompleted: boolean } |
 }
 
 // Queries endpoints and formats standard matches and alternatives
+// Helper to parse JSONP-style suggestion response from IMDb
+function parseImdbSuggestions(text: string): any[] {
+  const start = text.indexOf('(')
+  const end = text.lastIndexOf(')')
+  if (start === -1 || end === -1) return []
+  try {
+    const jsonStr = text.substring(start + 1, end)
+    const data = JSON.parse(jsonStr)
+    return data.d ?? []
+  } catch {
+    return []
+  }
+}
+
+// Queries endpoints and formats standard matches and alternatives
 async function scanSingleTitle(query: string, isCompleted: boolean, currentIndex: number): Promise<ParsedItem> {
-  const [tvmazeRes, itunesRes] = await Promise.all([
+  const cleanQuery = query.trim().toLowerCase()
+  const char = cleanQuery[0]
+  
+  const imdbPromise = /[a-z0-9]/.test(char)
+    ? fetch(`https://v3.sg.media-imdb.com/suggests/${char}/${encodeURIComponent(cleanQuery)}.json`)
+        .then((r) => (r.ok ? r.text() : ''))
+        .catch(() => '')
+    : Promise.resolve('')
+
+  const [tvmazeRes, itunesRes, jikanRes, imdbText] = await Promise.all([
     fetch(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(query)}`).then((r) =>
       r.ok ? r.json() : [],
     ).catch(() => []),
     fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(query)}&limit=5&country=us`).then((r) =>
       r.ok ? r.json() : { results: [] },
     ).catch(() => ({ results: [] })),
+    fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(query)}&limit=3`).then((r) =>
+      r.ok ? r.json() : { data: [] },
+    ).catch(() => ({ data: [] })),
+    imdbPromise,
   ])
+
+  const imdbItems = parseImdbSuggestions(imdbText)
 
   // Parse TVMaze results
   const tvShows = (tvmazeRes ?? []).slice(0, 3).map((item: any) => {
@@ -160,8 +191,54 @@ async function scanSingleTitle(query: string, isCompleted: boolean, currentIndex
       }
     })
 
+  // Parse Jikan Anime results
+  const jikanAnime = (jikanRes?.data ?? []).slice(0, 3).map((anime: any) => {
+    const title = anime.title_english ?? anime.title
+    const similarity = getSimilarity(query, title)
+    return {
+      id: `jikan-${anime.mal_id}`,
+      title,
+      mediaType: 'anime' as MediaType,
+      airingStatus: (anime.status === 'Finished Airing' ? 'finished' : 'continuing') as 'finished' | 'continuing',
+      posterUrl: anime.images?.jpg?.large_image_url ?? anime.images?.jpg?.image_url ?? null,
+      year: anime.year ?? (anime.aired?.from ? parseInt(anime.aired.from.split('-')[0]) : null),
+      genres: (anime.genres ?? []).map((g: any) => g.name),
+      overview: anime.synopsis ?? '',
+      rating: anime.score ?? null,
+      similarity
+    }
+  })
+
+  // Parse IMDb suggest results
+  const imdbShows = imdbItems
+    .filter((item: any) => item.id.startsWith('tt') && item.qid !== 'videoGame' && item.q !== 'video game')
+    .slice(0, 3)
+    .map((item: any) => {
+      const similarity = getSimilarity(query, item.l)
+      let mediaType: MediaType = 'movie'
+      let airingStatus: 'finished' | 'continuing' = 'finished'
+      if (item.qid === 'tvSeries' || item.qid === 'tvMiniSeries') {
+        mediaType = 'series'
+        airingStatus = 'continuing'
+      }
+      return {
+        id: item.id,
+        title: item.l,
+        mediaType,
+        airingStatus,
+        posterUrl: item.i ? item.i[0] : null,
+        year: item.y ?? null,
+        genres: [] as string[],
+        overview: item.s ? `Starring: ${item.s}` : '',
+        rating: null,
+        similarity
+      }
+    })
+
   // Sort candidates by string similarity
-  const allCandidates = [...tvShows, ...itunesMovies].sort((a, b) => b.similarity - a.similarity)
+  const allCandidates = [...imdbShows, ...tvShows, ...itunesMovies, ...jikanAnime].sort(
+    (a, b) => b.similarity - a.similarity,
+  )
 
   // Custom manual fallbacks
   const customMovie = {
@@ -242,11 +319,7 @@ async function scanSingleTitle(query: string, isCompleted: boolean, currentIndex
   if (isCompleted) {
     defaultStatus = 'finished'
   } else {
-    if (selectedMatch.mediaType === 'movie') {
-      defaultStatus = 'want_to_watch'
-    } else {
-      defaultStatus = selectedMatch.airingStatus === 'finished' ? 'finished' : 'watching'
-    }
+    defaultStatus = 'want_to_watch'
   }
 
   return {
@@ -263,6 +336,7 @@ async function scanSingleTitle(query: string, isCompleted: boolean, currentIndex
     rating: selectedMatch.rating,
     selected: true,
     isUnsure,
+    isCompleted,
     alternatives: finalAlternatives
   }
 }
@@ -373,6 +447,7 @@ export default function SmartPaste() {
               rating: null,
               selected: true,
               isUnsure: true,
+              isCompleted: item.isCompleted,
               alternatives: [
                 {
                   id: `err-movie-${Date.now()}-${currentIndex}`,
@@ -498,7 +573,7 @@ export default function SmartPaste() {
     const item = parsedItems[index]
     setReScanningId(item.id)
     try {
-      const updated = await scanSingleTitle(newQuery, item.status === 'finished', index)
+      const updated = await scanSingleTitle(newQuery, item.isCompleted, index)
       setParsedItems((prev) =>
         prev.map((p, idx) =>
           idx === index ? { ...updated, isEditing: false, editQuery: undefined } : p,
@@ -517,12 +592,10 @@ export default function SmartPaste() {
         if (idx !== index) return item
 
         let defaultStatus = item.status
-        if (item.status !== 'finished') {
-          if (alt.mediaType === 'movie') {
-            defaultStatus = 'want_to_watch'
-          } else {
-            defaultStatus = alt.airingStatus === 'finished' ? 'finished' : 'watching'
-          }
+        if (item.isCompleted) {
+          defaultStatus = 'finished'
+        } else {
+          defaultStatus = 'want_to_watch'
         }
 
         return {
