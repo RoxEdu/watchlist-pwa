@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { X, Loader2, Sparkles, Check, ChevronDown, ListPlus, Trash2, Edit2, AlertCircle, Search } from 'lucide-react'
 import { useUIStore } from '@/lib/store'
-import { db, addItem, getItemByImdbId } from '@/lib/db'
+import { db, addItem, getItemByImdbId, isDuplicateItem } from '@/lib/db'
 import { pushItem } from '@/lib/sync'
 import { useAuth } from '@/hooks/useAuth'
 import type { MediaType, Status } from '@/lib/types'
@@ -417,8 +417,8 @@ export default function SmartPaste() {
     try {
       let importedCount = 0
       for (const item of toImport) {
-        const existing = await getItemByImdbId(item.id)
-        if (existing) continue
+        const duplicate = await isDuplicateItem(item.title, item.mediaType, item.id)
+        if (duplicate) continue
 
         const newId = await addItem({
           imdbId: item.id,

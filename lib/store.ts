@@ -29,7 +29,19 @@ interface UIState {
   // Smart paste sheet
   smartPasteOpen: boolean
   setSmartPasteOpen: (v: boolean) => void
+
+  // Sort settings
+  sortBy: SortOption
+  setSortBy: (opt: SortOption) => void
 }
+
+export type SortOption =
+  | 'newest_added'
+  | 'oldest_added'
+  | 'alphabetical_az'
+  | 'alphabetical_za'
+  | 'newest_release'
+  | 'oldest_release'
 
 export const useUIStore = create<UIState>((set) => ({
   quickAddOpen: false,
@@ -52,4 +64,7 @@ export const useUIStore = create<UIState>((set) => ({
 
   smartPasteOpen: false,
   setSmartPasteOpen: (v) => set({ smartPasteOpen: v }),
+
+  sortBy: 'newest_added',
+  setSortBy: (opt) => set({ sortBy: opt }),
 }))

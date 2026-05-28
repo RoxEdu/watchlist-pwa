@@ -1,7 +1,7 @@
 'use client'
 
 import Dexie, { type Table } from 'dexie'
-import type { WatchlistItem } from './types'
+import type { WatchlistItem, MediaType } from './types'
 
 class WatchlistDB extends Dexie {
   items!: Table<WatchlistItem>
@@ -31,6 +31,17 @@ export async function deleteItem(id: number): Promise<void> {
 
 export async function getItemByImdbId(imdbId: string): Promise<WatchlistItem | undefined> {
   return db.items.where('imdbId').equals(imdbId).first()
+}
+
+export async function isDuplicateItem(title: string, type: MediaType, imdbId?: string): Promise<boolean> {
+  if (imdbId) {
+    const existingById = await db.items.where('imdbId').equals(imdbId).first()
+    if (existingById) return true
+  }
+  const existingByTitle = await db.items
+    .filter((item) => item.title.toLowerCase() === title.toLowerCase() && item.type === type)
+    .first()
+  return !!existingByTitle
 }
 
 export async function getAllItems(): Promise<WatchlistItem[]> {
