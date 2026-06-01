@@ -1,4 +1,7 @@
 // No API key required — uses iTunes, TVMaze, and Jikan (MyAnimeList)
+import type { WatchlistItem } from './types'
+import { CURATED_POOL_MOVIES, CURATED_POOL_SERIES, CURATED_POOL_ANIME } from './curated_pools'
+import type { CuratedItem } from './curated_pools'
 
 export interface TMDBSearchResult {
   tmdbId: string
@@ -329,3 +332,144 @@ export async function getPopularAnime(): Promise<TMDBSearchResult[]> {
     return []
   }
 }
+
+function normalizeTitle(title: string): string {
+  return title.toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+export async function getRecommendations(
+  category: 'movies' | 'series' | 'anime',
+  watchlistItems: WatchlistItem[]
+): Promise<TMDBSearchResult[]> {
+  const watchedTitles = new Set(watchlistItems.map(item => normalizeTitle(item.title)))
+  const watchedImdbIds = new Set(watchlistItems.map(item => item.imdbId))
+
+  const isAlreadyWatched = (title: string, id: string) => {
+    return watchedImdbIds.has(id) || watchedTitles.has(normalizeTitle(title))
+  }
+
+  // 1. ANIME: Try live Jikan Recommendations API first
+  if (category === 'anime') {
+    const userAnime = watchlistItems.filter(
+      item => item.type === 'anime' && item.myRating && item.myRating >= 4
+    )
+
+    if (userAnime.length > 0) {
+      // Sort by rating descending, then updated time descending
+      const sortedFavorites = [...userAnime].sort((a, b) => {
+        const ratingDiff = (b.myRating || 0) - (a.myRating || 0)
+        if (ratingDiff !== 0) return ratingDiff
+        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+      })
+
+      // Take the top favorite that has a Jikan ID
+      const target = sortedFavorites.find(item => item.imdbId && item.imdbId.startsWith('jikan-'))
+      if (target) {
+        const malId = target.imdbId.replace('jikan-', '')
+        try {
+          const res = await fetch(`https://api.jikan.moe/v4/anime/${malId}/recommendations`)
+          if (res.ok) {
+            const json = await res.json()
+            const recsData = json.data ?? []
+
+            // Map and filter
+            const mappedRecs: TMDBSearchResult[] = recsData
+              .map((r: any) => ({
+                tmdbId: `jikan-${r.entry.mal_id}`,
+                title: r.entry.title,
+                year: null,
+                mediaType: 'anime' as const,
+                posterUrl: r.entry.images?.jpg?.large_image_url || r.entry.images?.jpg?.image_url || null,
+                overview: `Recommended based on your interest in ${target.title}.`,
+                rating: null,
+              }))
+              .filter((r: TMDBSearchResult) => !isAlreadyWatched(r.title, r.tmdbId))
+
+            if (mappedRecs.length > 0) {
+              return mappedRecs.slice(0, 8)
+            }
+          }
+        } catch (err) {
+          console.error('Error fetching Jikan live recommendations:', err)
+        }
+      }
+    }
+
+    // Fallback to static genre match for anime
+    return getGenreRecommendations(CURATED_POOL_ANIME, watchlistItems, 'anime', isAlreadyWatched)
+  }
+
+  // 2. MOVIES & SERIES: Content-based genre overlap matching
+  if (category === 'movies') {
+    return getGenreRecommendations(CURATED_POOL_MOVIES, watchlistItems, 'movie', isAlreadyWatched)
+  } else {
+    return getGenreRecommendations(CURATED_POOL_SERIES, watchlistItems, 'series', isAlreadyWatched)
+  }
+}
+
+function getGenreRecommendations(
+  pool: CuratedItem[],
+  watchlistItems: WatchlistItem[],
+  type: 'movie' | 'series' | 'anime',
+  isAlreadyWatched: (title: string, id: string) => boolean
+): TMDBSearchResult[] {
+  // Collect user's favorite genres for this category
+  const categoryItems = watchlistItems.filter(
+    item => {
+      if (type === 'movie') return item.type === 'movie'
+      if (type === 'series') return item.type === 'series' || item.type === 'mini_series'
+      return item.type === 'anime'
+    }
+  )
+
+  const highRatedItems = categoryItems.filter(item => item.myRating && item.myRating >= 4)
+  const referenceItems = highRatedItems.length > 0 ? highRatedItems : categoryItems
+
+  // Calculate genre weights
+  const genreWeights: Record<string, number> = {}
+  referenceItems.forEach(item => {
+    const weight = item.myRating ? item.myRating : 3 // default weight 3 if not rated
+    item.genres.forEach(g => {
+      const cleanGenre = g.trim()
+      genreWeights[cleanGenre] = (genreWeights[cleanGenre] || 0) + weight
+    })
+  })
+
+  // Filter pool items
+  const candidates = pool.filter(item => !isAlreadyWatched(item.title, item.tmdbId))
+
+  // Score candidates
+  const scored = candidates.map(item => {
+    let score = 0
+    item.genres.forEach(g => {
+      if (genreWeights[g]) {
+        score += genreWeights[g]
+      }
+    })
+    
+    // Add small rating multiplier to break ties
+    if (item.rating) {
+      score += item.rating * 0.1
+    }
+
+    return { item, score }
+  })
+
+  // Sort by score descending, then rating descending
+  scored.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score
+    return (b.item.rating || 0) - (a.item.rating || 0)
+  })
+
+  // Map back to TMDBSearchResult
+  return scored.slice(0, 8).map(({ item }) => ({
+    tmdbId: item.tmdbId,
+    title: item.title,
+    year: item.year,
+    mediaType: item.mediaType === 'tv' ? 'tv' : item.mediaType,
+    posterUrl: item.posterUrl,
+    overview: item.overview,
+    rating: item.rating
+  }))
+}
+

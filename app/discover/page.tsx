@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { getPopularMovies, getPopularSeries, getPopularAnime } from '@/lib/tmdb'
+import { getPopularMovies, getPopularSeries, getPopularAnime, getRecommendations } from '@/lib/tmdb'
 import { useWatchlist } from '@/hooks/useWatchlist'
 import DiscoverCard from '@/components/DiscoverCard'
 import type { TMDBSearchResult } from '@/lib/tmdb'
@@ -34,6 +34,26 @@ export default function DiscoverPage() {
   const [loaded, setLoaded] = useState<Set<Category>>(new Set())
   const { items } = useWatchlist()
   const addedIds = new Set(items.map((i) => i.imdbId))
+
+  const [recs, setRecs] = useState<TMDBSearchResult[]>([])
+  const [recsLoading, setRecsLoading] = useState(false)
+
+  const itemsHash = items.map((i) => `${i.imdbId}-${i.myRating}`).join('|')
+
+  useEffect(() => {
+    setRecsLoading(true)
+    getRecommendations(category, items)
+      .then((results) => {
+        setRecs(results)
+      })
+      .catch((err) => {
+        console.error('Error fetching recommendations:', err)
+        setRecs([])
+      })
+      .finally(() => {
+        setRecsLoading(false)
+      })
+  }, [category, itemsHash])
 
   useEffect(() => {
     if (loaded.has(category)) return
@@ -80,6 +100,41 @@ export default function DiscoverPage() {
             </button>
           )
         })}
+      </div>
+
+      {/* Recommendations Row */}
+      {recsLoading ? (
+        <div className="mb-6 px-4">
+          <h2 className="text-white text-[15px] font-bold flex items-center gap-1.5 mb-3">
+            ✨ Recommended for You
+          </h2>
+          <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="w-[130px] aspect-[2/3] rounded-xl bg-white/5 animate-pulse flex-shrink-0" />
+            ))}
+          </div>
+        </div>
+      ) : recs.length > 0 ? (
+        <div className="mb-6 px-4">
+          <h2 className="text-white text-[15px] font-bold flex items-center gap-1.5 mb-3">
+            ✨ Recommended for You
+          </h2>
+          <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none">
+            {recs.map((item) => (
+              <div key={item.tmdbId} className="w-[130px] flex-shrink-0">
+                <DiscoverCard
+                  item={item}
+                  alreadyAdded={addedIds.has(item.tmdbId)}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Popular Picks Section */}
+      <div className="px-4 mb-3">
+        <h2 className="text-white text-[15px] font-bold">🔥 Popular Picks</h2>
       </div>
 
       {isLoading ? (
