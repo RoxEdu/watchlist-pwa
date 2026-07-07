@@ -1,15 +1,21 @@
 'use client'
 
-import { useMemo } from 'react'
-import { UserCircle, Cloud, CloudOff, RefreshCw, Sparkles } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { UserCircle, Cloud, CloudOff, RefreshCw, Sparkles, Shuffle } from 'lucide-react'
 import { useWatchlist } from '@/hooks/useWatchlist'
 import { useAuth } from '@/hooks/useAuth'
 import { useUIStore } from '@/lib/store'
 import MediaCard, { MediaListItem } from '@/components/MediaCard'
 import { AppLogo } from '@/components/Logo'
+import InstallButton from '@/components/InstallButton'
 import { STATUS_META } from '@/lib/types'
-import type { WatchlistItem } from '@/lib/types'
+import type { Status, WatchlistItem } from '@/lib/types'
 import SmartPaste from '@/components/SmartPaste'
+
+// Status chips shown at the top of Home, in display priority order.
+const HOME_FILTER_STATUSES: Status[] = [
+  'watching', 'want_to_watch', 'up_to_date', 'finished', 'on_hold', 'dropped',
+]
 
 function SectionRow({ title, items }: { title: string; items: WatchlistItem[] }) {
   if (items.length === 0) return null
@@ -40,13 +46,19 @@ function SyncIcon({ state }: { state: ReturnType<typeof useAuth>['syncState'] })
 export default function HomePage() {
   const { items, isLoading } = useWatchlist()
   const { user, syncState } = useAuth()
-  const { setProfileSheetOpen, setSmartPasteOpen } = useUIStore()
+  const { setProfileSheetOpen, setSmartPasteOpen, setDetailItem } = useUIStore()
+
+  // Active status filter for the Home view (null = overview with section rows)
+  const [homeFilter, setHomeFilter] = useState<Status | null>(null)
 
   const { watching, upToDate, wantToWatch, recent } = useMemo(() => ({
     watching: items.filter((i) => i.status === 'watching'),
     upToDate: items.filter((i) => i.status === 'up_to_date'),
     wantToWatch: items.filter((i) => i.status === 'want_to_watch'),
-    recent: items.slice(0, 6),
+    // Recency-true, independent of the app's default "smart" sort
+    recent: [...items]
+      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+      .slice(0, 6),
   }), [items])
 
   const statCounts = useMemo(() => {
@@ -54,6 +66,18 @@ export default function HomePage() {
     for (const item of items) c[item.status] = (c[item.status] ?? 0) + 1
     return c
   }, [items])
+
+  const filteredItems = useMemo(
+    () => (homeFilter ? items.filter((i) => i.status === homeFilter) : []),
+    [items, homeFilter],
+  )
+
+  function surpriseMe() {
+    const pool = items.filter((i) => i.status === 'want_to_watch')
+    const source = pool.length > 0 ? pool : items
+    if (source.length === 0) return
+    setDetailItem(source[Math.floor(Math.random() * source.length)])
+  }
 
   if (isLoading) {
     return (
@@ -74,28 +98,56 @@ export default function HomePage() {
           </div>
           <p className="text-white/30 text-sm mt-1.5 pl-0.5">{items.length} titles</p>
         </div>
-        <button
-          onClick={() => setProfileSheetOpen(true)}
-          className="mt-1 flex items-center gap-2 rounded-full bg-white/8 px-3 py-2 hover:bg-white/12 transition-colors"
-        >
-          <SyncIcon state={user ? syncState : 'idle'} />
-          {!user && <CloudOff size={14} className="text-white/30" />}
-          <UserCircle size={20} className={user ? 'text-violet-400' : 'text-white/40'} />
-        </button>
+        <div className="flex items-center gap-2 mt-1">
+          <InstallButton />
+          {items.length > 0 && (
+            <button
+              onClick={surpriseMe}
+              className="flex items-center gap-1.5 rounded-full bg-white/8 px-3 py-2 text-xs font-semibold text-white/70 hover:bg-white/12 hover:text-white transition-colors"
+              title="Open a random title from your list"
+            >
+              <Shuffle size={14} /> <span className="hidden sm:inline">Surprise me</span>
+            </button>
+          )}
+          <button
+            onClick={() => setProfileSheetOpen(true)}
+            className="flex items-center gap-2 rounded-full bg-white/8 px-3 py-2 hover:bg-white/12 transition-colors"
+          >
+            <SyncIcon state={user ? syncState : 'idle'} />
+            {!user && <CloudOff size={14} className="text-white/30" />}
+            <UserCircle size={20} className={user ? 'text-violet-400' : 'text-white/40'} />
+          </button>
+        </div>
       </div>
 
-      {/* Stat chips */}
+      {/* Status filter chips (tap to filter the view) */}
       {items.length > 0 && (
-        <div className="flex gap-3 overflow-x-auto px-4 mb-6 scrollbar-none">
-          {(['watching', 'want_to_watch', 'finished', 'on_hold'] as const).map((s) => {
+        <div className="flex gap-2.5 overflow-x-auto px-4 mb-6 scrollbar-none">
+          <button
+            onClick={() => setHomeFilter(null)}
+            className={`flex-shrink-0 rounded-xl px-4 py-3 transition-all ${
+              homeFilter === null ? 'bg-violet-600' : 'bg-white/8 hover:bg-white/12'
+            }`}
+          >
+            <p className={`text-xl font-bold ${homeFilter === null ? 'text-white' : 'text-white/80'}`}>{items.length}</p>
+            <p className="text-white/50 text-[11px] mt-0.5">All</p>
+          </button>
+          {HOME_FILTER_STATUSES.map((s) => {
             const count = statCounts[s] ?? 0
             if (count === 0) return null
             const meta = STATUS_META[s]
+            const active = homeFilter === s
             return (
-              <div key={s} className={`flex-shrink-0 rounded-xl px-4 py-3 ${meta.bg}`}>
+              <button
+                key={s}
+                onClick={() => setHomeFilter(active ? null : s)}
+                className={`flex-shrink-0 rounded-xl px-4 py-3 text-left transition-all ${meta.bg} ${
+                  active ? 'ring-2 ring-current ' + meta.color : 'opacity-90 hover:opacity-100'
+                }`}
+              >
                 <p className={`text-xl font-bold ${meta.color}`}>{count}</p>
                 <p className="text-white/50 text-[11px] mt-0.5">{meta.label}</p>
-              </div>
+              </button>
             )
           })}
         </div>
@@ -128,17 +180,38 @@ export default function HomePage() {
         </div>
       )}
 
-      <SectionRow title="Continue Watching" items={watching} />
-      <SectionRow title="Up to Date" items={upToDate} />
-      <SectionRow title="Want to Watch" items={wantToWatch} />
-
-      {recent.length > 0 && (
-        <div className="mb-6 px-4">
-          <h2 className="text-white font-semibold text-base mb-3">Recently Updated</h2>
-          <div className="flex flex-col gap-2">
-            {recent.map((item) => <MediaListItem key={item.id} item={item} />)}
+      {/* Filtered grid view */}
+      {homeFilter ? (
+        <div className="px-4 pb-4">
+          <div className="flex items-center gap-2 mb-3">
+            <h2 className="text-white font-semibold text-base">{STATUS_META[homeFilter].label}</h2>
+            <span className="text-white/30 text-xs">{filteredItems.length}</span>
           </div>
+          {filteredItems.length === 0 ? (
+            <p className="text-white/40 text-sm py-10 text-center">Nothing in this list yet.</p>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              {filteredItems.map((item) => (
+                <MediaCard key={item.id} item={item} />
+              ))}
+            </div>
+          )}
         </div>
+      ) : (
+        <>
+          <SectionRow title="Continue Watching" items={watching} />
+          <SectionRow title="Up to Date" items={upToDate} />
+          <SectionRow title="Want to Watch" items={wantToWatch} />
+
+          {recent.length > 0 && (
+            <div className="mb-6 px-4">
+              <h2 className="text-white font-semibold text-base mb-3">Recently Updated</h2>
+              <div className="flex flex-col gap-2">
+                {recent.map((item) => <MediaListItem key={item.id} item={item} />)}
+              </div>
+            </div>
+          )}
+        </>
       )}
       <SmartPaste />
     </div>

@@ -32,7 +32,13 @@ async function searchItunesMovies(query: string, limit = 8): Promise<TMDBSearchR
       limit: String(Math.max(30, limit * 4)),
       country: 'us',
     })
-    const res = await fetch(`https://itunes.apple.com/search?${params}`)
+    // iTunes has no CORS headers → in the browser go through our proxy route.
+    // On the server we can hit iTunes directly.
+    const url =
+      typeof window === 'undefined'
+        ? `https://itunes.apple.com/search?${params}`
+        : `/api/itunes?${params}`
+    const res = await fetch(url)
     if (!res.ok) return []
     const json = await res.json()
     const rawResults = json.results ?? []
@@ -264,13 +270,29 @@ export async function searchTMDB(query: string): Promise<TMDBSearchResult[]> {
 
 const CURATED_MOVIES = [
   'Dune Part Two 2024',
-  'Dunkirk (2017)',
+  'Oppenheimer 2023',
   'Barbie 2023',
   'The Dark Knight',
   'Interstellar',
   'Spider-Man: Across the Spider-Verse',
   'Knives Out',
   'Spider-Man: No Way Home',
+  'Inception',
+  'Everything Everywhere All at Once',
+  'The Batman 2022',
+  'Top Gun: Maverick',
+  'Parasite 2019',
+  'Joker 2019',
+  'Avengers: Endgame',
+  'John Wick 4',
+  'Whiplash',
+  'La La Land',
+  'The Godfather',
+  'Pulp Fiction',
+  'Fight Club',
+  'The Wolf of Wall Street',
+  'Gladiator',
+  'Guardians of the Galaxy Vol 3',
 ]
 
 export async function getPopularMovies(): Promise<TMDBSearchResult[]> {
@@ -304,6 +326,22 @@ const CURATED_SERIES = [
   'Squid Game',
   'Rick and Morty',
   'The Last of Us',
+  'The Bear',
+  'Better Call Saul',
+  'Succession',
+  'The Boys',
+  'House of the Dragon',
+  'True Detective',
+  'Peaky Blinders',
+  'Wednesday',
+  'Severance',
+  'The Mandalorian',
+  'Fargo',
+  'Sherlock',
+  'Westworld',
+  'Loki',
+  'The Witcher',
+  'Money Heist',
 ]
 
 export async function getPopularSeries(): Promise<TMDBSearchResult[]> {
@@ -324,7 +362,7 @@ export async function getPopularSeries(): Promise<TMDBSearchResult[]> {
 // Discover — anime: Jikan top anime (single request)
 export async function getPopularAnime(): Promise<TMDBSearchResult[]> {
   try {
-    const res = await fetch('https://api.jikan.moe/v4/top/anime?type=tv&limit=12')
+    const res = await fetch('https://api.jikan.moe/v4/top/anime?type=tv&limit=24')
     if (!res.ok) return []
     const json: { data: JikanAnime[] } = await res.json()
     return (json.data ?? []).map(mapJikan)

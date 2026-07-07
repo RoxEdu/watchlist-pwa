@@ -5,6 +5,7 @@ import QuickAdd from '@/components/QuickAdd'
 import DetailSheet from '@/components/DetailSheet'
 import StatusPicker from '@/components/StatusPicker'
 import ProfileSheet from '@/components/ProfileSheet'
+import RatingPrompt from '@/components/RatingPrompt'
 
 export const metadata: Metadata = {
   title: 'Watchlist',
@@ -40,6 +41,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <DetailSheet />
         <StatusPicker />
         <ProfileSheet />
+        <RatingPrompt />
       </body>
     </html>
   )

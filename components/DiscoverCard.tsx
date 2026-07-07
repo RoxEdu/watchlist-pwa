@@ -14,6 +14,7 @@ interface DiscoverCardProps {
 export default function DiscoverCard({ item, alreadyAdded = false }: DiscoverCardProps) {
   const [added, setAdded] = useState(alreadyAdded)
   const [loading, setLoading] = useState(false)
+  const [imgBroken, setImgBroken] = useState(false)
 
   const typeLabel =
     item.mediaType === 'movie' ? 'Movie'
@@ -34,13 +35,14 @@ export default function DiscoverCard({ item, alreadyAdded = false }: DiscoverCar
   return (
     <div className="relative bg-[#141414] rounded-xl overflow-hidden">
       <div className="relative aspect-[2/3] w-full overflow-hidden bg-[#1a1a1a]">
-        {item.posterUrl ? (
+        {item.posterUrl && !imgBroken ? (
           <Image
             src={item.posterUrl}
             alt={item.title}
             fill
             className="object-cover"
             sizes="(max-width: 768px) 50vw, 33vw"
+            onError={() => setImgBroken(true)}
           />
         ) : (
           <div className="flex h-full items-center justify-center text-white/20 text-4xl">🎬</div>

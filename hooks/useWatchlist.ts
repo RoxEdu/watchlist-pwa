@@ -8,8 +8,24 @@ import { pushItem, deleteItemFromCloud } from '@/lib/sync'
 import type { TMDBSearchResult } from '@/lib/tmdb'
 import { useUIStore } from '@/lib/store'
 
+// Default "smart" ordering: watching at the top, finished (and abandoned) at the bottom.
+const STATUS_PRIORITY: Record<Status, number> = {
+  watching: 0,
+  want_to_watch: 1,
+  up_to_date: 2,
+  finished: 3,
+  on_hold: 4,
+  dropped: 5,
+}
+
 function sortWatchlistItems(items: WatchlistItem[], sortBy: string): WatchlistItem[] {
   return [...items].sort((a, b) => {
+    if (sortBy === 'status_priority') {
+      const pA = STATUS_PRIORITY[a.status] ?? 99
+      const pB = STATUS_PRIORITY[b.status] ?? 99
+      if (pA !== pB) return pA - pB
+      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    }
     if (sortBy === 'newest_added') {
       return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
     }
@@ -216,19 +232,33 @@ export async function addManualEntry(entry: {
   if (saved) pushItem(saved).catch(() => {})
 }
 
+// If an item was just marked "finished" and has no personal rating yet,
+// surface the global rating prompt so the user can rate it.
+function maybePromptRating(item: WatchlistItem): void {
+  if (item.status === 'finished' && item.myRating == null) {
+    useUIStore.getState().setRatingPromptItem(item)
+  }
+}
+
 export async function cycleStatus(item: WatchlistItem, direction: 1 | -1 = 1): Promise<void> {
   const order: Status[] = ['want_to_watch', 'watching', 'up_to_date', 'finished', 'on_hold', 'dropped']
   const idx = order.indexOf(item.status)
   const next = order[Math.max(0, Math.min(order.length - 1, idx + direction))]
   await updateItem(item.id, { status: next })
   const updated = await db.items.get(item.id)
-  if (updated) pushItem(updated).catch(() => {})
+  if (updated) {
+    pushItem(updated).catch(() => {})
+    maybePromptRating(updated)
+  }
 }
 
 export async function setStatus(id: number, status: Status): Promise<void> {
   await updateItem(id, { status })
   const updated = await db.items.get(id)
-  if (updated) pushItem(updated).catch(() => {})
+  if (updated) {
+    pushItem(updated).catch(() => {})
+    maybePromptRating(updated)
+  }
 }
 
 // Cache of show/anime ID -> season episode counts

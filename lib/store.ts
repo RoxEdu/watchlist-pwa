@@ -14,6 +14,10 @@ interface UIState {
   statusPickerItem: WatchlistItem | null
   setStatusPickerItem: (item: WatchlistItem | null) => void
 
+  // Rating prompt (shown when an item is marked finished without a rating)
+  ratingPromptItem: WatchlistItem | null
+  setRatingPromptItem: (item: WatchlistItem | null) => void
+
   // Active tab filter
   activeTab: 'home' | MediaType | 'discover'
   setActiveTab: (tab: 'home' | MediaType | 'discover') => void
@@ -36,6 +40,7 @@ interface UIState {
 }
 
 export type SortOption =
+  | 'status_priority'
   | 'newest_added'
   | 'oldest_added'
   | 'alphabetical_az'
@@ -56,6 +61,9 @@ export const useUIStore = create<UIState>((set) => ({
   statusPickerItem: null,
   setStatusPickerItem: (item) => set({ statusPickerItem: item }),
 
+  ratingPromptItem: null,
+  setRatingPromptItem: (item) => set({ ratingPromptItem: item }),
+
   activeTab: 'home',
   setActiveTab: (tab) => set({ activeTab: tab, statusFilter: 'all' }),
 
@@ -68,6 +76,6 @@ export const useUIStore = create<UIState>((set) => ({
   smartPasteOpen: false,
   setSmartPasteOpen: (v) => set({ smartPasteOpen: v }),
 
-  sortBy: 'newest_added',
+  sortBy: 'status_priority',
   setSortBy: (opt) => set({ sortBy: opt }),
 }))

@@ -97,6 +97,7 @@ export default function MediaListPage({ type, title, emoji }: MediaListPageProps
             onChange={(e) => setSortBy(e.target.value as SortOption)}
             className="bg-transparent text-[11px] font-semibold text-violet-400 outline-none cursor-pointer hover:text-violet-300 transition-colors border-none py-0.5 pr-1"
           >
+            <option value="status_priority" className="bg-[#0f0f11] text-white">Smart (by Status)</option>
             <option value="newest_added" className="bg-[#0f0f11] text-white">Recently Added</option>
             <option value="oldest_added" className="bg-[#0f0f11] text-white">Oldest Added</option>
             <option value="my_rating_desc" className="bg-[#0f0f11] text-white">My Rating (High-Low)</option>

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { getPopularMovies, getPopularSeries, getPopularAnime, getRecommendations } from '@/lib/tmdb'
+import { getRecommendations } from '@/lib/tmdb'
 import { useWatchlist } from '@/hooks/useWatchlist'
 import DiscoverCard from '@/components/DiscoverCard'
 import type { TMDBSearchResult } from '@/lib/tmdb'
@@ -14,10 +14,12 @@ const CATEGORY_META: Record<Category, { label: string; emoji: string }> = {
   anime:  { label: 'Anime',  emoji: '⭐' },
 }
 
-const FETCHERS: Record<Category, () => Promise<TMDBSearchResult[]>> = {
-  movies: getPopularMovies,
-  series: getPopularSeries,
-  anime:  getPopularAnime,
+// Fetch popular picks through our server route so iTunes/TVMaze/Jikan
+// requests aren't blocked by browser CORS and are cached at the edge.
+async function fetchPopular(category: Category): Promise<TMDBSearchResult[]> {
+  const res = await fetch(`/api/discover?category=${category}`)
+  if (!res.ok) throw new Error('Failed to load')
+  return res.json()
 }
 
 export default function DiscoverPage() {
@@ -60,7 +62,7 @@ export default function DiscoverPage() {
     setLoading((l) => ({ ...l, [category]: true }))
     setError((e) => ({ ...e, [category]: null }))
 
-    FETCHERS[category]()
+    fetchPopular(category)
       .then((results) => {
         setDetails((d) => ({ ...d, [category]: results }))
         setLoaded((s) => new Set(s).add(category))
